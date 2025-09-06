@@ -1,4 +1,3 @@
-// src/services/precomputed-store.ts
 // Loads an iNFT manifest into memory and provides fast cosine search.
 // This uses a simple brute-force scan (great up to ~50k vectors).
 // You can later upgrade to an HNSW index behind the same interface.
