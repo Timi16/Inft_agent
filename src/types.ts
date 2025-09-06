@@ -1,25 +1,27 @@
+// src/types.ts
+// Core types for iNFT manifest and runtime.
 
 export type Quantization = "fp32" | "fp16" | "int8";
 
 export interface InftModelCard {
-  id: string;              // e.g., "Xenova/bge-small-en-v1.5" or "custom/debug"
-  dim: number;             // vector dimension (e.g., 384/768/1024 or 3 in test)
-  normalize: boolean;      // whether vectors are unit-length
+  id: string;              // e.g. "Xenova/bge-small-en-v1.5"
+  dim: number;             // 384/768/1024...
+  normalize: boolean;      // passages are L2-normalized?
   instruction: "e5" | "none";
-  mode: "passage";         // passages are pre-embedded as "passage"
+  mode: "passage";         // passages embedded as "passage"
   quantization?: Quantization;
-  checksum?: string;       // optional integrity tag for vectors blob(s)
+  checksum?: string;
 }
 
 export interface InftCharacter {
-  id: string;              // uuid or slug
+  id: string;
   name: string;
   username?: string;
   bio?: string | string[];
   system?: string;
   adjectives?: string[];
   topics?: string[];
-  knowledge?: string[];    // refs (facts/files/dirs), optional
+  knowledge?: string[];
   messageExamples?: string[][];
   postExamples?: string[];
   style?: Record<string, unknown>;
@@ -29,13 +31,12 @@ export interface InftCharacter {
 }
 
 export interface InftEntry {
-  id: string;              // unique id for this chunk
+  id: string;
   type: "knowledge" | "example" | "post" | string;
-  text: string;            // the chunk text
+  text: string;
   meta?: Record<string, unknown>;
-  // One of:
-  embedding_b64?: string;  // base64(Float32Array) of length model.dim
-  embedding?: number[];    // optional plain numbers for small sets
+  embedding_b64?: string;  // base64(Float32Array dim)
+  embedding?: number[];    // small inline arrays
 }
 
 export interface InftManifest {
@@ -43,16 +44,14 @@ export interface InftManifest {
   character: InftCharacter;
   model: InftModelCard;
   entries: InftEntry[];
-  // Optional external binary/index artifacts for large corpora
-  vectors_uri?: string;    // ipfs://... or https://... to a big binary
-  vectors_index?: string;  // prebuilt HNSW index (optional future)
+  vectors_uri?: string;    // ipfs://CID/path or https://...
+  vectors_index?: string;  // optional prebuilt HNSW
   license?: string;
 }
 
-// Search result shape returned by the store
 export interface VectorHit {
   id: string;
-  score: number;           // cosine similarity
+  score: number;           // cosine
   text: string;
   meta?: Record<string, unknown>;
 }
