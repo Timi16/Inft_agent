@@ -1,6 +1,4 @@
 // src/schema/inft-manifest.schema.ts
-// Zod schema to validate iNFT manifests at load-time.
-
 import { z } from "zod";
 
 export const InftModelCardSchema = z.object({
@@ -17,7 +15,7 @@ export const InftEntrySchema = z.object({
   id: z.string(),
   type: z.string(),
   text: z.string(),
-  meta: z.record(z.unknown()).optional(),
+  meta: z.record(z.string(), z.unknown()).optional(),      
   embedding_b64: z.string().optional(),
   embedding: z.array(z.number()).optional(),
 }).refine(
@@ -36,10 +34,10 @@ export const InftCharacterSchema = z.object({
   knowledge: z.array(z.string()).optional(),
   messageExamples: z.array(z.array(z.string())).optional(),
   postExamples: z.array(z.string()).optional(),
-  style: z.record(z.unknown()).optional(),
+  style: z.record(z.string(), z.unknown()).optional(),     
   plugins: z.array(z.string()).optional(),
-  settings: z.record(z.unknown()).optional(),
-  secrets: z.record(z.unknown()).optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
+  secrets: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const InftManifestSchema = z.object({
