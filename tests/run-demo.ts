@@ -5,11 +5,16 @@ import { loadManifest } from "../src/services/inft-loader-service";
 import { PrecomputedVectorStore } from "../src/services/precomputed-store";
 import { MockEmbedder3D, RemoteEmbedder } from "../src/services/embedding.service";
 import { normalizeInPlace } from "../src/utils/cosine";
+import path from "path/win32";
+import { fileURLToPath } from "url";
 
 async function main() {
   // 1) Load sample manifest (local file)
-  const manifestPath = new URL("./sample-manifest.json", import.meta.url).pathname;
-  const manifest = await loadManifest(manifestPath);
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const manifestPath = path.join(__dirname, "sample-manifest.json");
+
+const manifest = await loadManifest(manifestPath);
+
 
   // 2) Build in-memory store (re-normalize = false because sample is already unit vectors)
   const store = PrecomputedVectorStore.fromManifest(manifest, { reNormalize: false });
@@ -18,7 +23,7 @@ async function main() {
   // 3) Choose an embedder for the QUERY
   //    - For this test: MockEmbedder3D (works with dim=3 sample data)
   //    - For real use: RemoteEmbedder("http://localhost:8080") etc.
-  const embedder = new MockEmbedder3D();
+  const embedder = new RemoteEmbedder("http://localhost:8080");
   // const embedder = new RemoteEmbedder(process.env.EMBED_URL ?? "http://localhost:8080");
 
   // 4) Embed the user query (unit-normalized)
