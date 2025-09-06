@@ -2,13 +2,15 @@
   "name": "inft-agent",
   "version": "1.0.0",
   "type": "module",
-    "scripts": {
-    "dev": "tsx watch src/run-demo.ts",
-    "start": "tsx src/run-demo.ts",
-    "build": "tsc -p tsconfig.json"
+  "scripts": {
+    "dev": "tsx watch tests/run-demo.ts",
+    "start": "tsx tests/run-demo.ts",
+    "build": "tsc -p tsconfig.json",
+    "start:dist": "node dist/run-demo.js"
   },
   "devDependencies": {
     "@types/node": "^24.3.1",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   },
   "dependencies": {
