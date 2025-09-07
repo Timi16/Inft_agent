@@ -10,8 +10,8 @@ export class IpfsService {
   private pinata: InstanceType<typeof PinataSDK>;
 
   constructor(cfg: IpfsConfig = {}) {
-    const pinataJwt = cfg.jwt ?? process.env.PINATA_JWT!;
-    const pinataGateway = cfg.gateway ?? process.env.PINATA_GATEWAY!;
+    const pinataJwt =process.env.PINATA_JWT!;
+    const pinataGateway =process.env.PINATA_GATEWAY!;
     if (!pinataJwt) throw new Error("PINATA_JWT missing");
     if (!pinataGateway) throw new Error("PINATA_GATEWAY missing");
 
