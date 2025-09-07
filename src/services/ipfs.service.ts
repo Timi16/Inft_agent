@@ -1,4 +1,4 @@
-
+import "dotenv/config";
 import { PinataSDK } from "pinata";
 
 export interface IpfsConfig {
@@ -10,7 +10,7 @@ export class IpfsService {
   private pinata: InstanceType<typeof PinataSDK>;
 
   constructor(IpfsConfig = {}) {
-    const pinataJwt = process.env.PINATA_JWT!;
+    const pinataJwt = process.env.PINATA_JWT;
     const pinataGateway = process.env.PINATA_GATEWAY!;
     if (!pinataJwt) throw new Error("PINATA_JWT missing");
     if (!pinataGateway) throw new Error("PINATA_GATEWAY missing");

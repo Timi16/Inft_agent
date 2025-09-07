@@ -18,8 +18,8 @@ import { sha256Hex } from "../src/utils/hash";
 import { IpfsService } from "../src/services/ipfs.service";
 
 async function main() {
-  const IN = process.argv[2] ?? "tests/real/manifest.inline.json";
-  const OUT = process.argv[3] ?? "tests/real/manifest.external.json";
+  const IN = process.argv[2] ?? "tests/sample-manifest.json";
+  const OUT = process.argv[3] ?? "tests/sample-manifest.external.json";
 
   const raw = JSON.parse(await readFile(IN, "utf8"));
   const manifest = InftManifestSchema.parse(raw);

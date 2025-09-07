@@ -53,5 +53,6 @@
       }
     }
   ],
-  "vectors_uri": "ipfs://bafkreifafcubflm45ij6ty2ggbmhv64fomm7wgr7igoh67uaoogak623y4"
+  "vectors_uri": "ipfs://bafkreifafcubflm45ij6ty2ggbmhv64fomm7wgr7igoh67uaoogak623y4",
+  "vectors_checksum": "sha256:a028a812ad9cea13e9e34630587afb857319fb1a3f419c7f7e80738c057b5bc7"
 }

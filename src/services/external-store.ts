@@ -35,7 +35,7 @@ export class ExternalVectorStore {
     }
 
     // 3) Decode vectors blob
-    const { header, vectors } = decodeVectorsBlob(bytes.buffer);
+    const { header, vectors } = decodeVectorsBlob(bytes)
 
     // 4) Contract checks
     if (header.dim !== manifest.model.dim) {
