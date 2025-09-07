@@ -1,4 +1,3 @@
-// src/schema/inft-manifest.schema.ts
 import { z } from "zod";
 
 export const InftModelCardSchema = z.object({

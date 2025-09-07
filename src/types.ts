@@ -40,14 +40,16 @@ export interface InftEntry {
 }
 
 export interface InftManifest {
-  version: string;         // "1.0"
+  version: string;
   character: InftCharacter;
   model: InftModelCard;
   entries: InftEntry[];
-  vectors_uri?: string;    // ipfs://CID/path or https://...
-  vectors_index?: string;  // optional prebuilt HNSW
+  vectors_uri?: string;
+  vectors_index?: string;
+  vectors_checksum?: string;   // ← NEW
   license?: string;
 }
+
 
 export interface VectorHit {
   id: string;

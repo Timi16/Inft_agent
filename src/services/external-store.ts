@@ -21,7 +21,7 @@ export class ExternalVectorStore {
     const bytes = await fetchBytesSmart(manifest.vectors_uri, gateway);
 
     // 2) checksum verify (supports manifest.vectors_checksum OR model.checksum)
-    const expected = manifest.;
+    const expected = manifest.vectors_checksum;
     if (expected) {
       const got = sha256Hex(bytes);
       if (got !== expected) {
