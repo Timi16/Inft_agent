@@ -1,7 +1,7 @@
-//ExternalVectorStore: load vectors from external URI, verify checksum, decode, and provide search.
-//Supports IPFS, HTTP(S), and local file paths.
+// ExternalVectorStore: load vectors from external URI, verify checksum, decode, and provide search.
+// Supports IPFS (via gateway), HTTP(S), local file URLs, and bare file paths.
 
-import { decodeVectorsBlob } from "./binary.vector";
+import { decodeVectorsBlob } from "./binary.vector"; // ← fix filename
 import { fetchBytesSmart } from "../utils/uri";
 import { cosine, normalizeInPlace } from "../utils/cosine";
 import { sha256Hex } from "../utils/hash";
@@ -14,14 +14,19 @@ export class ExternalVectorStore {
   private metas: (Record<string, unknown> | undefined)[] = [];
   private ids: string[] = [];
 
-  static async fromManifestWithExternalVectors(manifest: InftManifest, gateway?: string): Promise<ExternalVectorStore> {
-    if (!manifest.vectors_uri) throw new Error("Manifest has no vectors_uri");
+  static async fromManifestWithExternalVectors(
+    manifest: InftManifest,
+    gateway?: string
+  ): Promise<ExternalVectorStore> {
+    if (!manifest.vectors_uri) {
+      throw new Error("Manifest has no vectors_uri");
+    }
 
-    // 1) fetch bytes (ipfs/http/file/path)
+    // 1) Fetch bytes (ipfs/http/file/path)
     const bytes = await fetchBytesSmart(manifest.vectors_uri, gateway);
 
-    // 2) checksum verify (supports manifest.vectors_checksum OR model.checksum)
-    const expected = manifest.vectors_checksum;
+    // 2) Checksum verify (supports manifest.vectors_checksum or model.checksum)
+    const expected = manifest.vectors_checksum || manifest.model.checksum;
     if (expected) {
       const got = sha256Hex(bytes);
       if (got !== expected) {
@@ -29,16 +34,18 @@ export class ExternalVectorStore {
       }
     }
 
-    // 3) decode vectors blob
+    // 3) Decode vectors blob
     const { header, vectors } = decodeVectorsBlob(bytes.buffer);
 
-    // 4) contract checks
-    if (header.dim !== manifest.model.dim) throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.model.dim}`);
+    // 4) Contract checks
+    if (header.dim !== manifest.model.dim) {
+      throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.model.dim}`);
+    }
     if (vectors.length !== manifest.entries.length) {
       throw new Error(`Blob count ${vectors.length} != manifest entries ${manifest.entries.length}`);
     }
 
-    // 5) assemble store
+    // 5) Assemble store
     const store = new ExternalVectorStore();
     store.model.id = manifest.model.id;
     store.model.dim = manifest.model.dim;
@@ -54,12 +61,19 @@ export class ExternalVectorStore {
       store.metas.push(entry.meta);
       store.ids.push(entry.id);
     }
+
     return store;
   }
 
-  size(): number { return this.vectors.length; }
+  size(): number {
+    return this.vectors.length;
+  }
 
-  search(queryVec: Float32Array, k = 8, filter?: (meta?: Record<string, unknown>) => boolean): VectorHit[] {
+  search(
+    queryVec: Float32Array,
+    k = 8,
+    filter?: (meta?: Record<string, unknown>) => boolean
+  ): VectorHit[] {
     const scores: { i: number; s: number }[] = [];
     for (let i = 0; i < this.vectors.length; i++) {
       if (filter && !filter(this.metas[i])) continue;
@@ -67,7 +81,10 @@ export class ExternalVectorStore {
     }
     scores.sort((a, b) => b.s - a.s);
     return scores.slice(0, Math.min(k, scores.length)).map(({ i, s }) => ({
-      id: this.ids[i], score: s, text: this.texts[i], meta: this.metas[i],
+      id: this.ids[i],
+      score: s,
+      text: this.texts[i],
+      meta: this.metas[i],
     }));
   }
 }
