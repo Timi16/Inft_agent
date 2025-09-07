@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "character": {
+    "id": "agent-denonymous",
+    "name": "Denonymous Helper",
+    "bio": [
+      "Helps with employee feedback and incentive policies."
+    ],
+    "adjectives": [
+      "helpful",
+      "precise"
+    ],
+    "topics": [
+      "feedback",
+      "incentives",
+      "policy"
+    ],
+    "settings": {
+      "k": 2
+    }
+  },
+  "model": {
+    "id": "Xenova/bge-small-en-v1.5",
+    "dim": 384,
+    "normalize": true,
+    "instruction": "e5",
+    "mode": "passage",
+    "quantization": "fp16"
+  },
+  "entries": [
+    {
+      "id": "doc-1#0",
+      "type": "knowledge",
+      "text": "Denonymous enables honest employee feedback across teams.",
+      "meta": {
+        "source": "docs/overview.md",
+        "section": "Intro",
+        "tags": [
+          "feedback"
+        ]
+      }
+    },
+    {
+      "id": "doc-1#1",
+      "type": "knowledge",
+      "text": "SocialFi incentives reward constructive contributions.",
+      "meta": {
+        "source": "docs/overview.md",
+        "section": "Incentives",
+        "tags": [
+          "incentives"
+        ]
+      }
+    }
+  ],
+  "vectors_uri": "file:///C:/Users/A/Documents/inft-agent/dist/vectors.bin",
+  "vectors_checksum": "sha256:0551a2fa19550461eba5ab26e9307629b913a2f16d134ed5957b6d5088dba7fb"
+}

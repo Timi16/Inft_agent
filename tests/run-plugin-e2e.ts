@@ -1,42 +1,40 @@
+// tests/run-plugin-e2e.ts
 /**
- * End-to-end test for the iNFT + Eliza + 0G plugin services.
+ * End-to-end test for the iNFT + Eliza + 0G plugin services (no mocks).
  *
- * What it does (no mocks):
- * 1) Loads a real iNFT manifest (ipfs://, https://, or file://).
- * 2) Verifies manifest has vectors_uri and checksum (if present).
- * 3) Loads the external vectors, builds an in-memory store.
- * 4) Uses LocalEmbedder (offline) to embed a real query, then searches top-k.
- * 5) Sends a composed prompt (with retrieved snippets) to 0G via broker (wallet-signed).
+ * Steps:
+ * 1) Load real iNFT manifest (ipfs://, https://, or file://).
+ * 2) Load external vectors (verifies checksum if present).
+ * 3) Choose embedder (REMOTE or LOCAL) based on env, and verify model contract.
+ * 4) Embed a real query -> cosine search top-k.
+ * 5) (Optional) Call 0G via broker and print reply.
  *
- * Run:
- *   npx tsx test/run-plugin-e2e.ts
- *
- * Required ENV:
- *   INFT_MANIFEST_URI=ipfs://CID/manifest.json | file:///.../manifest.external.json
- *   OG_RPC_URL=...  OG_PRIVATE_KEY=0x...  (to actually hit 0G inference)
- * Optional ENV:
- *   MODEL_ID=...  IPFS_GATEWAY=...  INFT_TOP_K=4  QUERY="..."
- *   OG_MODEL_HINT="llama"  TRANSFORMERS_CACHE=/path/to/cache
+ * IMPORTANT: The manifest.model.id/dim must match the query embedder model.
+ * Using RemoteEmbedder does NOT bypass that requirement.
  */
 
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-
-// Eliza core types (for basic runtime wiring)
+import "dotenv/config";
 import { logger } from "@elizaos/core";
 
-// Our services from the plugin you added
-import { InftKnowledgeService } from "../src/eliza/services/inft-knowledge.service";
-import { OgBrokerService } from "../src/eliza/services/og-broker.service";
-import "dotenv/config";
-// Utilities we already have
 import { loadManifest } from "../src/services/inft-loader-service";
 import { ExternalVectorStore } from "../src/services/external-store";
-import { LocalEmbedder } from "../src/services/local-embedder";
-import { ensureModelContract } from "../src/services/contracts";
 import { normalizeInPlace } from "../src/utils/cosine";
+import { ensureModelContract } from "../src/services/contracts";
+import { LocalEmbedder } from "../src/services/local-embedder";
+import { RemoteEmbedder } from "../src/services/embedding.service";
 
-// ---- Minimal runtime shim (real network/services, no mocks) ----
+import { OgBrokerService } from "../src/eliza/services/og-broker.service";
+
+// ---- Small helpers ----
+const dequote = (s?: string | null) =>
+  (s ?? "").trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
+
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing required env: ${name}`);
+  return v;
+}
+
 type RuntimeLike = {
   getSetting: (k: string) => string | undefined;
   getService: <T = unknown>(_name: any) => T | null;
@@ -46,73 +44,94 @@ const runtime: RuntimeLike = {
   getService: () => null,
 };
 
-// ---- Helpers ----
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env: ${name}`);
-  return v;
-}
-
 async function main() {
   logger.info("=== iNFT + 0G plugin E2E test ===");
 
   // 1) Load manifest
-  const manifestUri = process.env.INFT_MANIFEST_URI;
-  if (!manifestUri) {
-    throw new Error(
-      "INFT_MANIFEST_URI is required. Example: ipfs://<CID>/manifest.json or file:///abs/path/manifest.external.json"
-    );
-  }
+  const manifestUri = requireEnv("INFT_MANIFEST_URI");
   const manifest = await loadManifest(manifestUri);
-
   if (!manifest.vectors_uri) {
-    throw new Error(
-      "Manifest has no vectors_uri. Run your packer to externalize vectors, or provide a manifest with vectors_uri."
-    );
+    throw new Error("Manifest has no vectors_uri. Use your packer to externalize vectors first.");
   }
-
   logger.info(`Manifest loaded. model=${manifest.model.id} dim=${manifest.model.dim}`);
 
-  // 2) Build ExternalVectorStore (fetches ipfs/http/file and verifies checksum if present)
-  const store = await ExternalVectorStore.fromManifestWithExternalVectors(
-    manifest,
-    process.env.PINATA_GATEWAY
-  );
+  // 2) Load vectors
+  const gateway = process.env.PINATA_GATEWAY || process.env.IPFS_GATEWAY;
+  const store = await ExternalVectorStore.fromManifestWithExternalVectors(manifest, gateway);
   logger.info(`Vectors loaded: ${store.size()} entries.`);
 
-  // 3) Local query embedding (offline). Ensure model contract matches.
-  const embedder = new LocalEmbedder(process.env.MODEL_ID);
-  const info = await embedder.info();
-  ensureModelContract(manifest.model, info);
+  // 3) Pick embedder: REMOTE (your server) or LOCAL (xenova)
+  const useRemote = /^1|true$/i.test(String(process.env.USE_REMOTE_EMBEDDER || "0"));
+  const modelIdEnv = dequote(process.env.MODEL_ID) || manifest.model.id;
 
-  const query ="Give me a concise explanation of the feedback and incentive policies with key points.";
-  const [q] = await embedder.embed([query], {
-    mode: "query",
-    instruction: "e5",
-    normalize: true,
-  });
-  normalizeInPlace(q);
-
-  const k = Number(process.env.INFT_TOP_K);
-  const hits = store.search(q, k);
-
-  if (!hits.length) {
-    throw new Error("No retrieval hits. Check your manifest entries/text and query.");
+  // Hard contract check: manifest.model.id must equal the embedder model id you intend to use.
+  // If not, we fail here with a clear message so you regenerate the manifest correctly.
+  if (modelIdEnv !== manifest.model.id) {
+    throw new Error(
+      `Model contract mismatch:\n` +
+      `  manifest.model.id = ${manifest.model.id}\n` +
+      `  runtime MODEL_ID   = ${modelIdEnv}\n\n` +
+      `Fix: Rebuild the manifest with the same model you use for queries, OR set MODEL_ID to ${manifest.model.id}.\n` +
+      `Note: Using RemoteEmbedder does NOT bypass this — query and passage embeddings must be in the same vector space.`
+    );
   }
 
-  logger.info("Top retrieval hits:");
-  hits.forEach((h, i) =>
-    console.log(`  (${i + 1}) score=${h.score.toFixed(3)} :: ${h.text}`)
-  );
+  // Build the embedder
+  let embedOne: (q: string) => Promise<Float32Array>;
+  if (useRemote) {
+    const base = requireEnv("EMBEDDINGS_BASE_URL"); // e.g., http://localhost:8080
+    const remote = new RemoteEmbedder(base);
+    embedOne = async (q: string) => {
+      const vecs = await remote.embed([q], {
+        mode: "query",
+        instruction: "e5",
+        normalize: true,
+      });
+      const v = vecs[0];
+      if (v.length !== manifest.model.dim) {
+        throw new Error(
+          `Remote embedder dim ${v.length} != manifest dim ${manifest.model.dim}. ` +
+          `Ensure your embedding server runs the same model (${manifest.model.id}).`
+        );
+      }
+      return v;
+    };
+  } else {
+    const local = new LocalEmbedder(modelIdEnv);
+    const info = await local.info(); // warms model & sets dim
+    ensureModelContract(manifest.model, info); // id + dim check
+    embedOne = async (q: string) => {
+      const [v] = await local.embed([q], {
+        mode: "query",
+        instruction: "e5",
+        normalize: true,
+      });
+      return v;
+    };
+  }
 
-  const retrievedBlock =
+  // 4) Query -> search
+  const query =
+    process.env.QUERY ||
+    "Give me a concise explanation of the feedback and incentive policies with key points.";
+  const q = await embedOne(query);
+  normalizeInPlace(q);
+
+  const k = Number(process.env.INFT_TOP_K || 4);
+  const hits = store.search(q, k);
+  if (!hits.length) throw new Error("No retrieval hits. Check entries/text and your query.");
+
+  logger.info("Top retrieval hits:");
+  hits.forEach((h, i) => console.log(`  (${i + 1}) score=${h.score.toFixed(3)} :: ${h.text}`));
+
+  // Build prompt with retrieved context
+  const ctx =
     "### Retrieved Knowledge\n" +
     hits.map((h, i) => `(${i + 1}) [${h.score.toFixed(3)}] ${h.text}`).join("\n");
-
   const prompt = [
     `You are ${manifest.character.name}.`,
     manifest.character.system ? `System: ${manifest.character.system}` : "",
-    retrievedBlock,
+    ctx,
     "### Task",
     query,
     "",
@@ -121,21 +140,18 @@ async function main() {
     .filter(Boolean)
     .join("\n");
 
-  const missingOg = !process.env.OG_RPC_URL || !process.env.OG_PRIVATE_KEY;
-  if (missingOg) {
-    console.warn(
-      "\n[SKIP] OG inference: set OG_RPC_URL and OG_PRIVATE_KEY to run a real 0G call."
-    );
+  // 5) 0G call (optional)
+  if (!process.env.OG_RPC_URL && !process.env.EVM_RPC) {
+    console.warn("\n[SKIP] 0G inference: set OG_RPC_URL/EVM_RPC and OG_PRIVATE_KEY to run the call.");
     console.log("\nComposed prompt preview:\n", prompt);
-    process.exit(0);
+    return;
   }
+  // Allow both naming styles
+  process.env.OG_RPC_URL = process.env.OG_RPC_URL || process.env.EVM_RPC;
+  process.env.OG_PRIVATE_KEY = process.env.OG_PRIVATE_KEY || process.env.PRIVATE_KEY;
 
-  // OgBrokerService requires a runtime that exposes env; we pass our shim
   const og = await (OgBrokerService as any).start(runtime);
-  const res = await og.infer({
-    prompt,
-    modelHint: process.env.OG_MODEL_HINT,
-  });
+  const res = await og.infer({ prompt, modelHint: process.env.OG_MODEL_HINT });
 
   console.log("\n=== 0G Model Reply ===\n");
   console.log(res.text);
