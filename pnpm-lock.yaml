@@ -11,6 +11,9 @@ importers:
       ipfs-http-client:
         specifier: ^60.0.1
         version: 60.0.1(encoding@0.1.13)
+      pinata:
+        specifier: ^2.5.0
+        version: 2.5.0
       zod:
         specifier: ^4.1.5
         version: 4.1.5
@@ -551,6 +554,18 @@ packages:
 
   parse-duration@1.1.2:
     resolution: {integrity: sha512-p8EIONG8L0u7f8GFgfVlL4n8rnChTt8O5FSxgxMz2tjc9FMP199wxVKVB6IbKx11uTbKHACSvaLVIKNnoeNR/A==}
+
+  pinata@2.5.0:
+    resolution: {integrity: sha512-zjjrEUbEqeAE3gqIOy1K8f4xq3CDDefCgRj6tMqn14gbclSYo014+HQcfcKAAstMUjYNDb1yYQjxmBImW2kxCw==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
 
   progress-events@1.0.1:
     resolution: {integrity: sha512-MOzLIwhpt64KIVN64h1MwdKWiyKFNc/S6BoYKPIVUHFg0/eIEyBulhWCgn678v/4c0ri3FdGuzXymNCv02MUIw==}
@@ -1177,6 +1192,8 @@ snapshots:
   p-timeout@6.1.4: {}
 
   parse-duration@1.1.2: {}
+
+  pinata@2.5.0: {}
 
   progress-events@1.0.1: {}
 

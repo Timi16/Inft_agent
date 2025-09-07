@@ -1,60 +1,51 @@
-// 1) Loads a manifest with inline embeddings
-// 2) Packs vectors into a binary blob (fp32 or fp16)
-// 3) Uploads blob to IPFS
-// 4) Rewrites manifest to use vectors_uri and removes inline embeddings
-// 5) Uploads manifest JSON to IPFS
-// Prints both URIs for minting (tokenURI = manifest ipfs://CID)
-
+import "dotenv/config"; // <-- ensure .env is loaded
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { InftManifestSchema } from "../src/schema/inft-manifest-schema";
 import { encodeVectorsBlob } from "../src/services/binary.vector";
 import { IpfsService } from "../src/services/ipfs.service";
 
-const QUANT: 0 | 1 = (process.env.QUANT === "fp16") ? 1 : 0; // default fp32
+const QUANT: 0 | 1 = (process.env.QUANT === "fp16") ? 1 : 0;
 
 async function main() {
-  const manifestPath = new URL("./sample-manifest.json", import.meta.url).pathname;
+  const manifestUrl = new URL("./sample-manifest.json", import.meta.url);
+  const manifestPath = fileURLToPath(manifestUrl);
+
   const json = JSON.parse(await readFile(manifestPath, "utf8"));
   const manifest = InftManifestSchema.parse(json);
 
-  // Collect vectors in entry order
-  const vectors: Float32Array[] = manifest.entries.map((e, i) => {
+  // Collect vectors
+  const vectors: Float32Array[] = manifest.entries.map((e) => {
     if (Array.isArray(e.embedding)) return new Float32Array(e.embedding);
-    throw new Error(`Entry ${e.id} has no inline embedding[] for packing`);
+    if (e.embedding_b64) {
+      const buf = Buffer.from(e.embedding_b64, "base64");
+      return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+    }
+    throw new Error(`Entry ${e.id} has no embedding (embedding[] or embedding_b64)`);
   });
 
-  // Encode blob
   const blob = encodeVectorsBlob(vectors, QUANT);
   console.log(`Encoded vectors blob: dim=${manifest.model.dim} count=${vectors.length} bytes=${blob.byteLength}`);
 
-  // Upload blob to IPFS
-  const ipfs = new IpfsService({
-    apiUrl: process.env.IPFS_API_URL,          // e.g. http://127.0.0.1:5001/api/v0
-    projectId: process.env.IPFS_PROJECT_ID,    // for Infura/Pinata if needed
-    projectSecret: process.env.IPFS_PROJECT_SECRET,
-  });
+  // No args needed; service uses PINATA_JWT + PINATA_GATEWAY from .env
+  const ipfs = new IpfsService();
 
   const vectorsUp = await ipfs.addBytes(blob, "vectors.bin");
   console.log("vectors_uri:", vectorsUp.uri);
 
-  // Rewrite manifest: remove inline embeddings, set vectors_uri
   const stripped = {
     ...manifest,
-    model: {
-      ...manifest.model,
-      quantization: QUANT === 1 ? "fp16" : "fp32",
-    },
+    model: { ...manifest.model, quantization: QUANT === 1 ? "fp16" : "fp32" },
     vectors_uri: vectorsUp.uri,
     entries: manifest.entries.map(({ embedding, embedding_b64, ...rest }) => rest),
   };
 
-  // Upload manifest
-  const manUp = await ipfs.addJSON(stripped);
+  const manUp = await ipfs.addJSON(stripped, "manifest.json");
   console.log("manifest_uri:", manUp.uri);
 
-  // Optional: write local copy of the final manifest for debugging
-  await writeFile(manifestPath.replace(".json", ".external.json"), JSON.stringify(stripped, null, 2), "utf8");
-  console.log("Wrote:", manifestPath.replace(".json", ".external.json"));
+  const outPath = manifestPath.replace(".json", ".external.json");
+  await writeFile(outPath, JSON.stringify(stripped, null, 2), "utf8");
+  console.log("Wrote:", outPath);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
