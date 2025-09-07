@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "character": {
+    "id": "agent-denonymous",
+    "name": "Denonymous Helper",
+    "bio": [
+      "Helps with employee feedback and incentive policies."
+    ],
+    "adjectives": [
+      "helpful",
+      "precise"
+    ],
+    "topics": [
+      "feedback",
+      "incentives",
+      "policy"
+    ],
+    "settings": {
+      "k": 2
+    }
+  },
+  "model": {
+    "id": "custom/debug",
+    "dim": 3,
+    "normalize": true,
+    "instruction": "e5",
+    "mode": "passage",
+    "quantization": "fp32"
+  },
+  "entries": [
+    {
+      "id": "doc-1#0",
+      "type": "knowledge",
+      "text": "Denonymous enables honest employee feedback across teams.",
+      "meta": {
+        "source": "docs/overview.md",
+        "section": "Intro",
+        "tags": [
+          "feedback"
+        ]
+      }
+    },
+    {
+      "id": "doc-1#1",
+      "type": "knowledge",
+      "text": "SocialFi incentives reward constructive contributions.",
+      "meta": {
+        "source": "docs/overview.md",
+        "section": "Incentives",
+        "tags": [
+          "incentives"
+        ]
+      }
+    }
+  ],
+  "vectors_uri": "ipfs://bafkreifafcubflm45ij6ty2ggbmhv64fomm7wgr7igoh67uaoogak623y4"
+}
