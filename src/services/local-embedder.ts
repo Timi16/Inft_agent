@@ -1,6 +1,5 @@
 // Offline, in-process query embedder using @xenova/transformers.
-// One-time model download required; after that it reads from cache.
-// Set TRANSFORMERS_CACHE to a persistent folder.
+// First run downloads weights to TRANSFORMERS_CACHE; subsequent runs are offline.
 
 export type EmbedMode = "query" | "passage";
 export type Instruction = "e5" | "none";
@@ -21,11 +20,22 @@ export interface IEmbedder {
   info(): Promise<EmbedderInfo>;
 }
 
+// Remove accidental surrounding quotes (", ') and trim whitespace.
+function dequote(s?: string | null): string | undefined {
+  if (s == null) return undefined;
+  return s.trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
+}
+
 export class LocalEmbedder implements IEmbedder {
   private lazy: Promise<any> | null = null;
   private modelDim: number | null = null;
+  private modelId: string;
 
-  constructor(private modelId = process.env.MODEL_ID || "Xenova/bge-small-en-v1.5") {}
+  constructor(modelId?: string) {
+    // Prefer explicit arg, else env, and sanitize both.
+    const fromEnv = dequote(process.env.MODEL_ID);
+    this.modelId = dequote(modelId) || fromEnv || "Xenova/bge-small-en-v1.5";
+  }
 
   private async getPipe() {
     if (!this.lazy) {
@@ -52,12 +62,14 @@ export class LocalEmbedder implements IEmbedder {
     const pipe = await this.getPipe();
     const prefixed = this.withPrefix(texts, mode, instruction);
     const out = await pipe(prefixed, { pooling: "mean", normalize });
-    // transformers.js returns a Tensor with .data (Float32Array) and dims [n, d]
+
+    // transformers.js returns Tensor with .data (Float32Array) and .dims [n, d]
     const data: Float32Array = out.data;
     const dims: number[] = out.dims;
     const n = dims.length === 2 ? dims[0] : 1;
     const d = dims.length === 2 ? dims[1] : data.length;
     this.modelDim = d;
+
     const result: Float32Array[] = [];
     for (let i = 0; i < n; i++) {
       const slice = data.subarray(i * d, (i + 1) * d);
