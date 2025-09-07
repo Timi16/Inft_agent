@@ -1,4 +1,4 @@
-// src/services/ipfs.service.ts
+
 import { PinataSDK } from "pinata";
 
 export interface IpfsConfig {
@@ -9,9 +9,9 @@ export interface IpfsConfig {
 export class IpfsService {
   private pinata: InstanceType<typeof PinataSDK>;
 
-  constructor(cfg: IpfsConfig = {}) {
-    const pinataJwt =process.env.PINATA_JWT!;
-    const pinataGateway =process.env.PINATA_GATEWAY!;
+  constructor(IpfsConfig = {}) {
+    const pinataJwt = process.env.PINATA_JWT!;
+    const pinataGateway = process.env.PINATA_GATEWAY!;
     if (!pinataJwt) throw new Error("PINATA_JWT missing");
     if (!pinataGateway) throw new Error("PINATA_GATEWAY missing");
 
