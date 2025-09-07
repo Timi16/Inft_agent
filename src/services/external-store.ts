@@ -1,12 +1,10 @@
-//External store implementation
-
-// src/services/external-store.ts
-// Store that can load large vector sets from vectors_uri (ipfs:// or https://).
-// Uses the same ordering as manifest.entries (text/meta come from the JSON).
+//ExternalVectorStore: load vectors from external URI, verify checksum, decode, and provide search.
+//Supports IPFS, HTTP(S), and local file paths.
 
 import { decodeVectorsBlob } from "./binary.vector";
-import { resolveToHttp } from "../utils/uri";
+import { fetchBytesSmart } from "../utils/uri";
 import { cosine, normalizeInPlace } from "../utils/cosine";
+import { sha256Hex } from "../utils/hash";
 import type { InftManifest, VectorHit } from "../types";
 
 export class ExternalVectorStore {
@@ -18,29 +16,35 @@ export class ExternalVectorStore {
 
   static async fromManifestWithExternalVectors(manifest: InftManifest, gateway?: string): Promise<ExternalVectorStore> {
     if (!manifest.vectors_uri) throw new Error("Manifest has no vectors_uri");
-    const httpUrl = resolveToHttp(manifest.vectors_uri, gateway);
 
-    const res = await fetch(httpUrl);
-    if (!res.ok) throw new Error(`Failed to fetch vectors blob: ${res.status} ${res.statusText}`);
-    const buf = await res.arrayBuffer();
+    // 1) fetch bytes (ipfs/http/file/path)
+    const bytes = await fetchBytesSmart(manifest.vectors_uri, gateway);
 
-    const { header, vectors } = decodeVectorsBlob(buf);
-
-    // Basic contract checks
-    if (header.dim !== manifest.model.dim) {
-      throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.model.dim}`);
+    // 2) checksum verify (supports manifest.vectors_checksum OR model.checksum)
+    const expected = manifest.;
+    if (expected) {
+      const got = sha256Hex(bytes);
+      if (got !== expected) {
+        throw new Error(`Vectors checksum mismatch: got=${got} expected=${expected}`);
+      }
     }
+
+    // 3) decode vectors blob
+    const { header, vectors } = decodeVectorsBlob(bytes.buffer);
+
+    // 4) contract checks
+    if (header.dim !== manifest.model.dim) throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.model.dim}`);
     if (vectors.length !== manifest.entries.length) {
       throw new Error(`Blob count ${vectors.length} != manifest entries ${manifest.entries.length}`);
     }
 
+    // 5) assemble store
     const store = new ExternalVectorStore();
     store.model.id = manifest.model.id;
     store.model.dim = manifest.model.dim;
     store.model.normalize = manifest.model.normalize;
     store.model.instruction = manifest.model.instruction;
 
-    // Normalize if needed
     for (let i = 0; i < vectors.length; i++) {
       const v = vectors[i];
       if (!store.model.normalize) normalizeInPlace(v);
@@ -50,7 +54,6 @@ export class ExternalVectorStore {
       store.metas.push(entry.meta);
       store.ids.push(entry.id);
     }
-
     return store;
   }
 

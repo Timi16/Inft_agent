@@ -47,6 +47,7 @@ export const InftManifestSchema = z.object({
   entries: z.array(InftEntrySchema).min(1),
   vectors_uri: z.string().optional(),
   vectors_index: z.string().optional(),
+  vectors_checksum: z.string().optional(),   // ← NEW
   license: z.string().optional(),
 });
 
