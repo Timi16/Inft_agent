@@ -1,73 +1,69 @@
-import "dotenv/config";
+// src/utils/uri.ts
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 
-/** Ensure we have a usable gateway URL (adds https://, trims, ensures trailing /) */
-function normalizeGateway(input?: string): string {
-  let gw = (input ?? process.env.PINATA_GATEWAY ?? "").trim();
-  if (!gw) {
-    throw new Error(
-      "PINATA_GATEWAY not set. Put your domain (e.g. violet-...mypinata.cloud) in .env"
-    );
-  }
-  if (!/^https?:\/\//i.test(gw)) {
-    gw = "https://" + gw;
-  }
-  gw = gw.replace(/\/+$/, "") + "/"; // ensure single trailing slash
-  return gw;
+const dequote = (s?: string | null) => (s ?? "").trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
+
+export const isHttpLike = (u: string) => /^https?:\/\//i.test(u);
+export const isIpfsLike = (u: string) => /^ipfs:\/\//i.test(u);
+export const isFileLike = (u: string) => /^file:/i.test(u);
+export const isWinAbs = (p: string) => /^[a-zA-Z]:[\\/]/.test(p);
+
+/** ipfs://… → http(s) gateway url */
+export function ipfsToHttp(ipfsUri: string, gateway?: string) {
+  const gw = (gateway || process.env.PINATA_GATEWAY || process.env.IPFS_GATEWAY || "https://ipfs.io/ipfs/").replace(/\/+$/, "");
+  const path = ipfsUri.replace(/^ipfs:\/\//i, "");
+  return `${gw}/${path}`;
 }
 
-/** Resolve ipfs:// or ipns:// to your HTTP(S) gateway */
-export function resolveToHttp(uri: string, gateway?: string): string {
-  const gw = normalizeGateway(gateway);
+/** Normalize anything "file-ish" into a real local path */
+export function toLocalPath(input: string): string {
+  let s = dequote(input);
 
-  if (uri.startsWith("ipfs://")) {
-    // ipfs://<cid>/...  ->  https://<gw>/ipfs/<cid>/...
-    const rest = uri.slice("ipfs://".length).replace(/^ipfs\/+/i, "");
-    return gw + "ipfs/" + rest.replace(/^\/+/, "");
+  // fix invalid variants like "file:\C:\..." or "file:/C:/..."
+  if (/^file:\\/i.test(s) || /^file:\/(?!\/)/i.test(s)) {
+    s = s.replace(/^file:\\/i, "file:///").replace(/^file:\//i, "file:///");
   }
 
-  if (uri.startsWith("ipns://")) {
-    // ipns://<name>/... ->  https://<gw>/ipns/<name>/...
-    const rest = uri.slice("ipns://".length).replace(/^ipns\/+/i, "");
-    return gw + "ipns/" + rest.replace(/^\/+/, "");
+  if (isFileLike(s)) {
+    // Proper file URL → convert via WHATWG URL
+    try {
+      return fileURLToPath(new URL(s));
+    } catch {
+      // fallback: strip file: and leading slashes/backslashes
+      let p = s.replace(/^file:/i, "").replace(/^[\/\\]+/, "");
+      return p;
+    }
   }
 
-  // Already a gateway path like /ipfs/<cid> or /ipns/<name>
-  if (uri.startsWith("/ipfs/") || uri.startsWith("/ipns/")) {
-    return gw + uri.replace(/^\/+/, "");
-  }
-
-  // http(s) or anything else: leave unchanged
-  return uri;
+  // plain path
+  if (isWinAbs(s) || isAbsolute(s)) return s;
+  // relative path → resolve against CWD
+  return resolvePath(process.cwd(), s);
 }
 
-/** Fetch bytes from ipfs://, ipns://, /ipfs/, http(s)://, file://, or a bare local path. */
+/** Fetch bytes from ipfs/http/file/local path safely */
 export async function fetchBytesSmart(uriOrPath: string, gateway?: string): Promise<Uint8Array> {
-  if (
-    uriOrPath.startsWith("ipfs://") ||
-    uriOrPath.startsWith("ipns://") ||
-    uriOrPath.startsWith("/ipfs/") ||
-    uriOrPath.startsWith("/ipns/")
-  ) {
-    const url = resolveToHttp(uriOrPath, gateway);
+  const src = dequote(uriOrPath);
+
+  if (isIpfsLike(src)) {
+    const url = ipfsToHttp(src, gateway);
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`Failed to fetch via gateway: ${r.status} ${r.statusText}`);
-    return new Uint8Array(await r.arrayBuffer());
+    if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${url}`);
+    const ab = await r.arrayBuffer();
+    return new Uint8Array(ab);
   }
 
-  if (uriOrPath.startsWith("http://") || uriOrPath.startsWith("https://")) {
-    const r = await fetch(uriOrPath);
-    if (!r.ok) throw new Error(`Failed to fetch HTTP(S): ${r.status} ${r.statusText}`);
-    return new Uint8Array(await r.arrayBuffer());
+  if (isHttpLike(src)) {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${src}`);
+    const ab = await r.arrayBuffer();
+    return new Uint8Array(ab);
   }
 
-  if (uriOrPath.startsWith("file://")) {
-    const p = uriOrPath.replace(/^file:\/\//, "");
-    const buf = await readFile(p);
-    return new Uint8Array(buf);
-  }
-
-  // bare filesystem path (relative/absolute)
-  const buf = await readFile(uriOrPath);
-  return new Uint8Array(buf);
+  // file:// or plain local path
+  const path = toLocalPath(src);
+  const buf = await readFile(path);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
