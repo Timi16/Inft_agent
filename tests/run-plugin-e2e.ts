@@ -43,7 +43,7 @@ async function main() {
   logger.info(`Vectors loaded: ${store.size()} entries.`);
 
   // 2) Embedder (REMOTE or LOCAL)
-  const useRemote = /^1|true$/i.test(String(process.env.USE_REMOTE_EMBEDDER || "0"));
+  const useRemote = /^1|true$/i.test(String(process.env.USE_REMOTE_EMBEDDER));
   const modelIdEnv = dequote(process.env.MODEL_ID) || manifest.model.id;
 
   if (modelIdEnv !== manifest.model.id) {
