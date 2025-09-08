@@ -1,41 +1,26 @@
-// src/eliza-og-plugin/services/og-broker.service.ts
 import { Service, IAgentRuntime, logger, ServiceType } from "@elizaos/core";
-import { Wallet, JsonRpcProvider } from "ethers";
+import { Wallet, JsonRpcProvider, formatEther } from "ethers";
 import { createRequire } from "node:module";
 
-// ---- Dynamic loader to avoid ESM/CJS export mismatch ----
 type CreateBrokerFn = (signer: any) => Promise<any>;
 
-async function loadCreateBroker(): Promise<CreateBrokerFn> {
-  // 1) Try package ESM entry (named export)
-  try {
-    const esm = await import("@0glabs/0g-serving-broker");
-    const fn =
-      (esm as any).createZGComputeNetworkBroker ??
-      (esm as any).default?.createZGComputeNetworkBroker;
-    if (typeof fn === "function") return fn as CreateBrokerFn;
-  } catch {
-    // fall through to CJS
-  }
-  // 2) Try CommonJS build (in case the runtime resolves CJS)
+async function loadCreateBrokerPreferCjs(): Promise<CreateBrokerFn> {
+  // Prefer package main via require() (CJS) to avoid the ESM error-formatter path.
   try {
     const require = createRequire(import.meta.url);
     const cjs = require("@0glabs/0g-serving-broker");
-    const fn =
-      cjs?.createZGComputeNetworkBroker ?? cjs?.default?.createZGComputeNetworkBroker;
+    const fn = cjs?.createZGComputeNetworkBroker ?? cjs?.default?.createZGComputeNetworkBroker;
     if (typeof fn === "function") return fn as CreateBrokerFn;
-  } catch {
-    // fall through
-  }
-  // 3) Hard fail with a helpful message
-  throw new Error(
-    "Failed to load @0glabs/0g-serving-broker. " +
-      "It provides a named export `createZGComputeNetworkBroker` (no default). " +
-      "Ensure the package is installed and your runtime supports ESM."
-  );
+  } catch {}
+  // Fallback to ESM
+  const esm = await import("@0glabs/0g-serving-broker");
+  const fn =
+    (esm as any).createZGComputeNetworkBroker ??
+    (esm as any).default?.createZGComputeNetworkBroker;
+  if (typeof fn === "function") return fn as CreateBrokerFn;
+  throw new Error("createZGComputeNetworkBroker not found in @0glabs/0g-serving-broker");
 }
 
-// Minimal shape for a service entry (per 0G docs)
 export type OgService = {
   provider: string;
   serviceType: string;
@@ -55,6 +40,53 @@ export type OgInferParams = {
   modelHint?: string;
 };
 
+// ---------- Ledger helpers ----------
+
+/** Get broker ledger balance (A0GI) and whether it exists. */
+async function getLedgerBalance(broker: any): Promise<{ exists: boolean; balance: number }> {
+  try {
+    const info = await broker.ledger.getLedger();
+    const raw = (info && (info.balance ?? info?.data?.balance)) ?? 0;
+    return { exists: true, balance: Number(raw) };
+  } catch {
+    return { exists: false, balance: 0 };
+  }
+}
+
+/** Ensure the broker ledger exists & is funded to at least `minimum` A0GI. */
+async function ensureFundedLedger(broker: any, minimum = 0.1) {
+  const target = Number(minimum);
+  if (!Number.isFinite(target) || target <= 0) {
+    throw new Error(`Invalid minimum fund amount: ${minimum}`);
+  }
+
+  let { exists, balance } = await getLedgerBalance(broker);
+
+  if (!exists) {
+    try {
+      await broker.ledger.addLedger(target); // number in A0GI
+      exists = true;
+      balance = target;
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      if (!/exist|already/i.test(msg)) throw err;
+      // ledger already exists
+      exists = true;
+      ({ balance } = await getLedgerBalance(broker));
+    }
+  }
+
+  if (balance < target) {
+    const diff = target - balance;
+    await broker.ledger.depositFund(diff); // number in A0GI
+    ({ balance } = await getLedgerBalance(broker));
+  }
+
+  return { exists, balance };
+}
+
+// ---------- Service ----------
+
 export class OgBrokerService extends Service {
   static serviceType = ServiceType.TEE;
   capabilityDescription =
@@ -66,6 +98,7 @@ export class OgBrokerService extends Service {
   private wallet!: Wallet;
   private broker!: any;
   private services: OgService[] = [];
+  private minFund: number = Number(process.env.OG_MIN_FUND ?? 0.1);
 
   constructor(protected runtime: IAgentRuntime) {
     super(runtime);
@@ -79,23 +112,45 @@ export class OgBrokerService extends Service {
 
   async stop(): Promise<void> {}
 
-  private requireEnv(key: string): string {
-    const v = process.env[key] || this.runtime.getSetting?.(key);
-    if (!v) throw new Error(`Missing required setting: ${key}`);
+  private requireEnv(name: string): string {
+    const v = process.env[name] || this.runtime.getSetting?.(name);
+    if (!v) throw new Error(`Missing required env: ${name}`);
     return v;
   }
 
+  /** Public: read the broker ledger balance (A0GI). */
+  async ledgerInfo(): Promise<{ exists: boolean; balance: number }> {
+    return getLedgerBalance(this.broker);
+  }
+
+  /** Public: read wallet address + native balance (formatted as ETH-style 18-decimals). */
+  async walletInfo(): Promise<{ address: string; nativeBalance: string }> {
+    const address = await this.wallet.getAddress();
+    const wei = await this.provider.getBalance(address);
+    return { address, nativeBalance: formatEther(wei) };
+  }
+
+  /** Public: list discovered services. */
+  async listServices(): Promise<OgService[]> {
+    return this.services.slice();
+  }
+
   private async initialize() {
-    this.rpcUrl = this.requireEnv("OG_RPC_URL");
-    this.privateKey = this.requireEnv("OG_PRIVATE_KEY"); // must be 0x-prefixed for ethers
+    this.rpcUrl = this.requireEnv("EVM_RPC");
+    this.privateKey = this.requireEnv("PRIVATE_KEY"); // 0x-prefixed
+    logger.info(`[0G] RPC: ${this.rpcUrl}`);
 
     this.provider = new JsonRpcProvider(this.rpcUrl);
     this.wallet = new Wallet(this.privateKey, this.provider);
 
-    const createZGComputeNetworkBroker = await loadCreateBroker();
-    this.broker = await createZGComputeNetworkBroker(this.wallet);
+    const createBroker = await loadCreateBrokerPreferCjs();
+    this.broker = await createBroker(this.wallet);
 
-    // list services (API moved under .inference in newer docs; support both)
+    // Fund ledger before billable actions (prevents formatter crash path)
+    const pre = await ensureFundedLedger(this.broker, this.minFund);
+    logger.info(`[0G] Ledger balance (pre-list): ${pre.balance.toFixed(4)} A0GI (exists=${pre.exists})`);
+
+    // list services (support both old top-level and new .inference)
     const listSvc =
       this.broker?.inference?.listService?.bind(this.broker.inference) ??
       this.broker?.listService?.bind(this.broker);
@@ -105,6 +160,7 @@ export class OgBrokerService extends Service {
   }
 
   private selectProvider(opts: { providerAddress?: string; modelHint?: string }): OgService {
+    if (!this.services.length) throw new Error("No 0G services available");
     if (opts.providerAddress) {
       const s = this.services.find(
         (x) => x.provider.toLowerCase() === opts.providerAddress!.toLowerCase()
@@ -118,31 +174,45 @@ export class OgBrokerService extends Service {
       );
       if (s) return s;
     }
-    if (!this.services.length) throw new Error("No 0G services available");
     return this.services[0];
   }
 
   async infer(params: OgInferParams): Promise<{ text: string; chatID?: string; provider: string; model: string }> {
     const svc = this.selectProvider({
       providerAddress: params.providerAddress,
-      modelHint: params.modelHint,
+      modelHint: params.modelHint ?? process.env.OG_MODEL_HINT,
     });
 
-    // getServiceMetadata may be on broker.inference in newer docs; support both
+    // Fetch meta
     const getMeta =
       this.broker?.inference?.getServiceMetadata?.bind(this.broker.inference) ??
       this.broker?.getServiceMetadata?.bind(this.broker);
     if (!getMeta) throw new Error("Broker is missing getServiceMetadata()");
     const { endpoint, model } = await getMeta(svc.provider);
 
-    // Acknowledge provider once before use
+    // Ack once per signer/provider
     await this.broker.inference.acknowledgeProviderSigner(svc.provider);
 
-    // Billing headers are single-use; generate per request
+    // Generate single-use billing headers
     const contentForBilling = params.prompt;
-    const headers = await this.broker.inference.getRequestHeaders(svc.provider, contentForBilling);
+    let headers: Record<string, string>;
+    try {
+      // Top-up if needed just before header gen
+      await ensureFundedLedger(this.broker, this.minFund);
+      headers = await this.broker.inference.getRequestHeaders(svc.provider, contentForBilling);
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      const esmFormatterCrashed = msg.includes("keccak256") || msg.includes("error-handler.ts");
+      if (!esmFormatterCrashed) throw e;
 
-    // Build OpenAI-compatible body
+      // Recreate via CJS + refund, then retry once
+      const createBroker = await loadCreateBrokerPreferCjs();
+      this.broker = await createBroker(this.wallet);
+      await ensureFundedLedger(this.broker, this.minFund);
+      await this.broker.inference.acknowledgeProviderSigner(svc.provider);
+      headers = await this.broker.inference.getRequestHeaders(svc.provider, contentForBilling);
+    }
+
     const messages =
       params.messages ?? [{ role: "system", content: params.prompt }];
 
@@ -165,9 +235,6 @@ export class OgBrokerService extends Service {
       json?.output ??
       JSON.stringify(json);
     const chatID: string | undefined = json?.id || json?.chat_id;
-
-    // Optional: verify proof for verifiable services
-    // const valid = await this.broker.inference.processResponse(svc.provider, text, chatID);
 
     return { text, chatID, provider: svc.provider, model };
   }
