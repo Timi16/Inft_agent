@@ -1,17 +1,17 @@
-// src/eliza-og-plugin/services/og-broker.service.ts
+// src/eliza/services/og-broker.service.ts
 import { Service, IAgentRuntime, logger, ServiceType } from "@elizaos/core";
-import { Wallet, JsonRpcProvider } from "ethers";
+import { Wallet, JsonRpcProvider, formatEther } from "ethers";
 import { createRequire } from "node:module";
 
 type CreateBrokerFn = (signer: any) => Promise<any>;
 
-// Prefer package main via require() (CJS) to avoid ESM error-formatter path.
-// Fall back to ESM only if CJS isn’t available.
+/** Prefer package main via require() (CJS) to avoid the ESM error-formatter path; fallback to ESM. */
 async function loadCreateBrokerPreferCjs(): Promise<CreateBrokerFn> {
   try {
     const require = createRequire(import.meta.url);
     const cjs = require("@0glabs/0g-serving-broker");
-    const fn = cjs?.createZGComputeNetworkBroker ?? cjs?.default?.createZGComputeNetworkBroker;
+    const fn =
+      cjs?.createZGComputeNetworkBroker ?? cjs?.default?.createZGComputeNetworkBroker;
     if (typeof fn === "function") return fn as CreateBrokerFn;
   } catch {}
   const esm = await import("@0glabs/0g-serving-broker");
@@ -41,20 +41,75 @@ export type OgInferParams = {
   modelHint?: string;
 };
 
-// Ensure a ledger exists & has funds in A0GI; idempotent-ish across SDK versions
-async function ensureFundedLedger(broker: any, min = 0.01) {
-  const getLedger = broker?.ledger?.getLedger?.bind(broker.ledger);
-  let balance = 0;
-  if (getLedger) {
-    const info = await getLedger().catch(() => null);
-    balance = Number((info && (info.balance ?? info?.data?.balance)) ?? 0);
+/**
+ * Fund only what the wallet can afford after reserving gas.
+ * Numbers only (A0GI). Creates ledger if missing; otherwise deposits delta.
+ */
+async function ensureFundedLedger(
+  broker: any,
+  provider: JsonRpcProvider,
+  walletAddr: string,
+  min = 0.01,          // desired target on-ledger balance
+  gasReserve = 0.0015  // keep this for tx fees so add/deposit won't revert
+) {
+  const target = Number(min);
+  const reserve = Math.max(0, Number(gasReserve));
+  if (!Number.isFinite(target) || target <= 0) {
+    throw new Error(`ensureFundedLedger: invalid target amount: ${min}`);
   }
-  if (!balance || balance < min) {
-    await broker.ledger?.addLedger?.(String(min)).catch(() => {});
-    if (!broker?.ledger?.depositFund) {
-      throw new Error("Broker ledger API missing depositFund(amount). Update @0glabs/0g-serving-broker.");
+
+  // 1) Wallet native balance → available for funding after gas reserve
+  const balWei = await provider.getBalance(walletAddr);
+  const walletBal = Number(formatEther(balWei));
+  const available = Math.max(0, +(walletBal - reserve).toFixed(6));
+  if (!Number.isFinite(available) || available <= 0) {
+    throw new Error(
+      `Insufficient wallet balance: have ${walletBal.toFixed(6)} A0GI, reserve ${reserve}, ` +
+      `available ${available}. Top up or lower the target.`
+    );
+  }
+
+  // 2) Try to read existing ledger balance (SDK variants differ)
+  let current: number | null = null;
+  const getLedger = broker?.ledger?.getLedger?.bind(broker.ledger);
+  if (typeof getLedger === "function") {
+    const info = await getLedger().catch(() => null);
+    const raw = info?.balance ?? info?.data?.balance;
+    if (raw !== undefined) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) current = n;
     }
-    await broker.ledger.depositFund(String(min));
+  }
+
+  // Helper: deposit a clamped Number amount
+  const deposit = async (amount: number) => {
+    const amt = Math.max(0, +amount.toFixed(6));
+    if (amt <= 0) return;
+    await broker.ledger.depositFund(amt);
+  };
+
+  // 3) If we can see a balance, top up only the needed delta (but no more than available)
+  if (current !== null) {
+    if (current >= target) return;
+    const need = Math.max(0, +(target - current).toFixed(6));
+    const fund = Math.min(need, available);
+    await deposit(fund);
+    return;
+  }
+
+  // 4) No readable balance → try to create with an affordable initial amount
+  const init = Math.min(target, available);
+  try {
+    await broker.ledger.addLedger(+init.toFixed(6));
+    return;
+  } catch (e: any) {
+    // If creation failed (already exists or masked by formatter), try a deposit fallback.
+    try {
+      await deposit(init);
+      return;
+    } catch {
+      throw e;
+    }
   }
 }
 
@@ -89,7 +144,7 @@ export class OgBrokerService extends Service {
   }
 
   private async initialize() {
-    // ⬇⬇⬇ SINGLE SOURCE OF TRUTH: EVM_RPC & PRIVATE_KEY
+    // === Single source of truth: EVM_RPC & PRIVATE_KEY ===
     this.rpcUrl = this.requireEnv("EVM_RPC");
     this.privateKey = this.requireEnv("PRIVATE_KEY"); // must be 0x-prefixed
 
@@ -97,13 +152,33 @@ export class OgBrokerService extends Service {
     this.provider = new JsonRpcProvider(this.rpcUrl);
     this.wallet = new Wallet(this.privateKey, this.provider);
 
+    // Preflight: network & wallet balance
+    const [net, bal] = await Promise.all([
+      this.provider.getNetwork(),
+      this.provider.getBalance(this.wallet.address),
+    ]);
+    logger.info(`[0G] chainId=${net.chainId} balance=${formatEther(bal)} A0GI`);
+    if (bal === 0n) {
+      throw new Error(
+        `0G wallet has 0 A0GI on chainId=${net.chainId}. Fund ${this.wallet.address} on 0G testnet, then rerun.`
+      );
+    }
+
+    // Create broker
     const createBroker = await loadCreateBrokerPreferCjs();
     this.broker = await createBroker(this.wallet);
 
-    // Avoid business-error path that triggers the ESM formatter crash
-    await ensureFundedLedger(this.broker, 0.01);
+    // Ensure ledger exists and is funded (affordable funding)
+    const gasReserve = Number(process.env.OG_GAS_RESERVE || "0.0015");
+    await ensureFundedLedger(
+      this.broker,
+      this.provider,
+      this.wallet.address,
+      Number(process.env.OG_MIN_LEDGER || "0.01"),
+      gasReserve
+    );
 
-    // list services (support both old top-level and new .inference)
+    // List services (supports old top-level and new .inference)
     const listSvc =
       this.broker?.inference?.listService?.bind(this.broker.inference) ??
       this.broker?.listService?.bind(this.broker);
@@ -136,7 +211,7 @@ export class OgBrokerService extends Service {
       modelHint: params.modelHint ?? process.env.OG_MODEL_HINT,
     });
 
-    // Get service meta
+    // Get service metadata (endpoint, model id)
     const getMeta =
       this.broker?.inference?.getServiceMetadata?.bind(this.broker.inference) ??
       this.broker?.getServiceMetadata?.bind(this.broker);
@@ -146,7 +221,7 @@ export class OgBrokerService extends Service {
     // Required once per signer
     await this.broker.inference.acknowledgeProviderSigner(svc.provider);
 
-    // Generate single-use billing headers (catch the ESM keccak formatter case; recreate via CJS and retry)
+    // Generate single-use billing headers (retry via CJS if ESM formatter crashes)
     const contentForBilling = params.prompt;
     let headers: Record<string, string>;
     try {
@@ -158,7 +233,16 @@ export class OgBrokerService extends Service {
 
       const createBroker = await loadCreateBrokerPreferCjs();
       this.broker = await createBroker(this.wallet);
-      await ensureFundedLedger(this.broker, 0.01);
+
+      const gasReserve = Number(process.env.OG_GAS_RESERVE || "0.0015");
+      await ensureFundedLedger(
+        this.broker,
+        this.provider,
+        this.wallet.address,
+        Number(process.env.OG_MIN_LEDGER || "0.01"),
+        gasReserve
+      );
+
       await this.broker.inference.acknowledgeProviderSigner(svc.provider);
       headers = await this.broker.inference.getRequestHeaders(svc.provider, contentForBilling);
     }
