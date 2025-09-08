@@ -56,11 +56,11 @@ async function main() {
   logger.info(`Manifest loaded. model=${manifest.model.id} dim=${manifest.model.dim}`);
 
   // 2) Load vectors
-  const gateway = process.env.PINATA_GATEWAY || process.env.IPFS_GATEWAY;
+  const gateway = process.env.PINATA_GATEWAY;
   const store = await ExternalVectorStore.fromManifestWithExternalVectors(manifest, gateway);
   logger.info(`Vectors loaded: ${store.size()} entries.`);
 
-  // 3) Pick embedder: REMOTE (your server) or LOCAL (xenova)
+  // 3) Pick embedder: REMOTE (your server) or LOCAL (xenova)cl
   const useRemote = /^1|true$/i.test(String(process.env.USE_REMOTE_EMBEDDER || "0"));
   const modelIdEnv = dequote(process.env.MODEL_ID) || manifest.model.id;
 
