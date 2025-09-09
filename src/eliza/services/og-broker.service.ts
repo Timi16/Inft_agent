@@ -1,10 +1,13 @@
-// src/eliza/services/og-broker.service.ts
-// Clean, “normal” imports (no ESM/CJS shenanigans).
+// Normal imports, no dynamic require/import hacks.
 import { Service, IAgentRuntime, logger, ServiceType } from "@elizaos/core";
 import { Wallet, JsonRpcProvider } from "ethers";
 import { createZGComputeNetworkBroker } from "@0glabs/0g-serving-broker";
+import OpenAI from "openai";
+import { webcrypto as _webcrypto } from "node:crypto";
 
-// Types that mirror broker service listings
+// Ensure WebCrypto is available for the broker's crypto adapter
+if (!(globalThis as any).crypto) (globalThis as any).crypto = _webcrypto;
+
 export type OgService = {
   provider: string;
   serviceType: string;
@@ -18,11 +21,10 @@ export type OgService = {
 };
 
 export type OgInferParams = {
-  providerAddress?: string; // optional: pick a specific provider
-  prompt: string;           // main user prompt (used for header signing)
-  // Optional chat history; if not provided we'll use { role: "user", content: prompt }
+  providerAddress?: string;
+  prompt: string;
   messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-  modelHint?: string;       // optional: pick a provider by model substring
+  modelHint?: string;
 };
 
 export class OgBrokerService extends Service {
@@ -34,7 +36,6 @@ export class OgBrokerService extends Service {
   private privateKey!: string;
   private provider!: JsonRpcProvider;
   private wallet!: Wallet;
-  // Type-safe without importing broker types directly:
   private broker!: Awaited<ReturnType<typeof createZGComputeNetworkBroker>>;
   private services: OgService[] = [];
   private initialized = false;
@@ -49,12 +50,9 @@ export class OgBrokerService extends Service {
     return svc;
   }
 
-  async stop(): Promise<void> {
-    // nothing to tear down
-  }
+  async stop(): Promise<void> {}
 
   private getSetting(name: string, fallback?: string): string {
-    // .env first, then runtime settings, then fallback
     const v = process.env[name] || this.runtime.getSetting?.(name) || fallback;
     if (!v) throw new Error(`Missing required env: ${name}`);
     return v;
@@ -63,18 +61,15 @@ export class OgBrokerService extends Service {
   private async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    // 1) RPC + signer
     this.rpcUrl = this.getSetting("EVM_RPC", "https://evmrpc-testnet.0g.ai");
-    this.privateKey = this.getSetting("PRIVATE_KEY"); // must be 0x-prefixed hex
+    this.privateKey = this.getSetting("PRIVATE_KEY");
 
     logger.info(`[0G] RPC: ${this.rpcUrl}`);
     this.provider = new JsonRpcProvider(this.rpcUrl);
     this.wallet = new Wallet(this.privateKey, this.provider);
 
-    // 2) Broker
     this.broker = await createZGComputeNetworkBroker(this.wallet);
 
-    // 3) Discover services
     this.services = await this.broker.inference.listService();
     if (!this.services.length) {
       throw new Error("No 0G inference services available.");
@@ -102,14 +97,15 @@ export class OgBrokerService extends Service {
       if (byModel) return byModel;
     }
 
-    // Default: first service
     return this.services[0];
   }
 
   /**
-   * Perform a single chat completion request via 0G broker.
-   * - Signs request headers with your wallet (billing/auth)
-   * - Calls provider's OpenAI-compatible /chat/completions
+   * Mirror Code A flow:
+   * - acknowledge signer
+   * - get service metadata
+   * - sign headers with getRequestHeaders(provider, message)
+   * - call provider via OpenAI client using defaultHeaders
    */
   async infer(
     params: OgInferParams
@@ -118,47 +114,45 @@ export class OgBrokerService extends Service {
 
     const svc = this.selectProvider({
       providerAddress: params.providerAddress,
-      modelHint: params.modelHint,
+      modelHint: params.modelHint || process.env.OG_MODEL_HINT,
     });
 
-    // Service endpoint + model metadata
     const { endpoint, model } = await this.broker.inference.getServiceMetadata(svc.provider);
-
-    // Required once per signer per provider (safe to call repeatedly)
     await this.broker.inference.acknowledgeProviderSigner(svc.provider);
 
-    // Headers must be derived from the content being billed
-    const headers = await this.broker.inference.getRequestHeaders(
-      svc.provider,
-      params.prompt
-    );
+    // Use the billed content (same as Code A)
+    const userMessage = params.prompt;
 
-    // Messages payload (use prompt as user message if none provided)
+    // This call was crashing for you due to missing WebCrypto. Fixed by polyfill above.
+    const headers = await this.broker.inference.getRequestHeaders(svc.provider, userMessage);
+
     const messages =
-      params.messages ?? [{ role: "user", content: params.prompt }];
+      params.messages ??
+      [
+        // Keep it simple & Code-A-like: one user message
+        { role: "user", content: userMessage },
+      ];
 
-    // Node 18+ has global fetch; no polyfills needed.
-    const res = await fetch(`${endpoint}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ model, messages }),
+    const openai = new OpenAI({
+      baseURL: endpoint,
+      apiKey: "", // not used by 0G
+      defaultHeaders: { ...headers } as Record<string, string>,
     });
 
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
-      throw new Error(
-        `0G inference failed: ${res.status} ${res.statusText} :: ${errBody}`
-      );
-    }
+    const completion = await openai.chat.completions.create({
+      model,
+      messages,
+    });
 
-    const json = await res.json();
-    const text: string =
-      json?.choices?.[0]?.message?.content ??
-      json?.content ??
-      json?.output ??
-      JSON.stringify(json);
-    const chatID: string | undefined = json?.id ?? json?.chat_id;
+    const text =
+      completion.choices?.[0]?.message?.content ??
+      JSON.stringify(completion);
 
-    return { text, chatID, provider: svc.provider, model };
+    return {
+      text,
+      chatID: (completion as any)?.id,
+      provider: svc.provider,
+      model,
+    };
   }
 }
