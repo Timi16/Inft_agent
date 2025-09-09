@@ -6,6 +6,9 @@ import { Wallet, JsonRpcProvider } from "ethers";
 import { createZGComputeNetworkBroker } from "@0glabs/0g-serving-broker";
 import OpenAI from "openai";
 
+// Make sure ethers is fully imported for crypto functions
+import * as ethers from "ethers";
+
 export type OgService = {
   provider: string;
   serviceType: string;
@@ -44,7 +47,7 @@ export class OgBrokerService extends Service {
   private endpoint: string | null = null;
   private model: string | null = null;
 
-  // Retain Code B’s cached list (optional)
+  // Retain Code B's cached list (optional)
   private services: OgService[] = [];
 
   constructor(protected runtime: IAgentRuntime) {
@@ -71,32 +74,43 @@ export class OgBrokerService extends Service {
     this.rpcUrl = this.getSetting("EVM_RPC");
     this.privateKey = this.getSetting("PRIVATE_KEY");
 
-    this.provider = new JsonRpcProvider(this.rpcUrl);
-    this.wallet = new Wallet(this.privateKey, this.provider);
+    // Create provider with explicit ethers reference
+    this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
+    
+    // Create wallet with explicit ethers reference
+    this.wallet = new ethers.Wallet(this.privateKey, this.provider);
 
-    // Code A: create broker with wallet signer
-    this.broker = await createZGComputeNetworkBroker(this.wallet);
+    try {
+      // Create broker - this might need the full ethers context
+      this.broker = await createZGComputeNetworkBroker(this.wallet as any);
 
-    // Discover services
-    this.services = await this.broker.inference.listService();
-    if (!this.services.length) throw new Error("No 0G inference services available.");
+      // Discover services
+      this.services = await this.broker.inference.listService();
+      if (!this.services.length) throw new Error("No 0G inference services available.");
 
-    // Code A: pick the first service
-    this.providerAddress = this.services[0].provider;
+      // Code A: pick the first service
+      this.providerAddress = this.services[0].provider;
 
-    // Code A: acknowledge signer for this provider
-    await this.broker.inference.acknowledgeProviderSigner(this.providerAddress);
+      // Code A: acknowledge signer for this provider
+      await this.broker.inference.acknowledgeProviderSigner(this.providerAddress);
 
-    // Code A: get endpoint + model from metadata
-    const meta = await this.broker.inference.getServiceMetadata(this.providerAddress);
-    this.endpoint = meta.endpoint;
-    this.model = meta.model;
+      // Code A: get endpoint + model from metadata
+      const meta = await this.broker.inference.getServiceMetadata(this.providerAddress);
+      this.endpoint = meta.endpoint;
+      this.model = meta.model;
 
-    this.isInitialized = true;
-    logger.info(`OgBrokerService: initialized; provider=${this.providerAddress}, model=${this.model}`);
+      this.isInitialized = true;
+      logger.info(`OgBrokerService: initialized; provider=${this.providerAddress}, model=${this.model}`);
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error(`Inference error: ${msg}`);
+        throw error; // preserves original stack
+}
+
   }
+
   /**
-   * Code A flow inside Code B’s `infer`:
+   * Code A flow inside Code B's `infer`:
    * - ensure initialized
    * - use class-level providerAddress/endpoint/model
    * - sign headers with getRequestHeaders(providerAddress, billedContent)
@@ -121,37 +135,43 @@ export class OgBrokerService extends Service {
       throw new Error("OgBrokerService is not properly initialized.");
     }
 
-    const billedContent = params.prompt;
+    const content = params.prompt;
 
-    // Code A: get per-request signed headers
-    const headers = await this.broker.inference.getRequestHeaders(
-      this.providerAddress,
-      billedContent
-    );
+    try {
+      // Code A: get per-request signed headers
+      const headers = await this.broker.inference.getRequestHeaders(
+        this.providerAddress,
+        content
+      );
 
-    const messages =
-      params.messages ?? [{ role: "user", content: billedContent }];
+      const messages =
+        params.messages ?? [{ role: "user", content: content }];
 
-    const openai = new OpenAI({
-      baseURL: this.endpoint,
-      apiKey: "", // not required by 0G
-      defaultHeaders: headers as unknown as Record<string, string>,
-    });
-    
-    const completion = await openai.chat.completions.create({
-      model: this.model,
-      messages,
-    });
+      const openai = new OpenAI({
+        baseURL: this.endpoint,
+        apiKey: "dummy-key", // Use a dummy key instead of empty string
+        defaultHeaders: headers as unknown as Record<string, string>,
+      });
+      
+      const completion = await openai.chat.completions.create({
+        model: this.model,
+        messages,
+      });
 
-    const text =
-      completion.choices?.[0]?.message?.content ??
-      JSON.stringify(completion);
+      const text =
+        completion.choices?.[0]?.message?.content ??
+        JSON.stringify(completion);
 
-    return {
-      text,
-      chatID: (completion as any)?.id,
-      provider: this.providerAddress,
-      model: this.model,
-    };
+      return {
+        text,
+        chatID: (completion as any)?.id,
+        provider: this.providerAddress,
+        model: this.model,
+      };
+    } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.error(`Inference error: ${msg}`);
+        throw error; // preserves original stack
+    }
   }
 }
