@@ -1,12 +1,10 @@
-// Normal imports, no dynamic require/import hacks.
+// Code B rewritten in Code A style (no global crypto shims, no icons)
+
+import "dotenv/config";
 import { Service, IAgentRuntime, logger, ServiceType } from "@elizaos/core";
 import { Wallet, JsonRpcProvider } from "ethers";
 import { createZGComputeNetworkBroker } from "@0glabs/0g-serving-broker";
 import OpenAI from "openai";
-import { webcrypto as _webcrypto } from "node:crypto";
-
-// Ensure WebCrypto is available for the broker's crypto adapter
-if (!(globalThis as any).crypto) (globalThis as any).crypto = _webcrypto;
 
 export type OgService = {
   provider: string;
@@ -34,11 +32,20 @@ export class OgBrokerService extends Service {
 
   private rpcUrl!: string;
   private privateKey!: string;
+
+  // Code A–style core fields
   private provider!: JsonRpcProvider;
   private wallet!: Wallet;
   private broker!: Awaited<ReturnType<typeof createZGComputeNetworkBroker>>;
+
+  // Service state (Code A pattern)
+  private isInitialized = false;
+  private providerAddress: string | null = null;
+  private endpoint: string | null = null;
+  private model: string | null = null;
+
+  // Retain Code B’s cached list (optional)
   private services: OgService[] = [];
-  private initialized = false;
 
   constructor(protected runtime: IAgentRuntime) {
     super(runtime);
@@ -59,88 +66,80 @@ export class OgBrokerService extends Service {
   }
 
   private async initialize(): Promise<void> {
-    if (this.initialized) return;
+    if (this.isInitialized) return;
 
-    this.rpcUrl = this.getSetting("EVM_RPC", "https://evmrpc-testnet.0g.ai");
+    this.rpcUrl = this.getSetting("EVM_RPC");
     this.privateKey = this.getSetting("PRIVATE_KEY");
 
-    logger.info(`[0G] RPC: ${this.rpcUrl}`);
     this.provider = new JsonRpcProvider(this.rpcUrl);
     this.wallet = new Wallet(this.privateKey, this.provider);
 
+    // Code A: create broker with wallet signer
     this.broker = await createZGComputeNetworkBroker(this.wallet);
 
+    // Discover services
     this.services = await this.broker.inference.listService();
-    if (!this.services.length) {
-      throw new Error("No 0G inference services available.");
-    }
-    logger.info(`OgBrokerService: loaded ${this.services.length} services`);
-    this.initialized = true;
+    if (!this.services.length) throw new Error("No 0G inference services available.");
+
+    // Code A: pick the first service
+    this.providerAddress = this.services[0].provider;
+
+    // Code A: acknowledge signer for this provider
+    await this.broker.inference.acknowledgeProviderSigner(this.providerAddress);
+
+    // Code A: get endpoint + model from metadata
+    const meta = await this.broker.inference.getServiceMetadata(this.providerAddress);
+    this.endpoint = meta.endpoint;
+    this.model = meta.model;
+
+    this.isInitialized = true;
+    logger.info(`OgBrokerService: initialized; provider=${this.providerAddress}, model=${this.model}`);
   }
-
-  private selectProvider(opts?: { providerAddress?: string; modelHint?: string }): OgService {
-    const { providerAddress, modelHint } = opts ?? {};
-    if (!this.services.length) throw new Error("No 0G services available");
-
-    if (providerAddress) {
-      const match = this.services.find(
-        (s) => s.provider.toLowerCase() === providerAddress.toLowerCase()
-      );
-      if (match) return match;
-      throw new Error(`0G provider not found: ${providerAddress}`);
-    }
-
-    if (modelHint) {
-      const byModel = this.services.find((s) =>
-        (s.model ?? "").toLowerCase().includes(modelHint.toLowerCase())
-      );
-      if (byModel) return byModel;
-    }
-
-    return this.services[0];
-  }
-
   /**
-   * Mirror Code A flow:
-   * - acknowledge signer
-   * - get service metadata
-   * - sign headers with getRequestHeaders(provider, message)
-   * - call provider via OpenAI client using defaultHeaders
+   * Code A flow inside Code B’s `infer`:
+   * - ensure initialized
+   * - use class-level providerAddress/endpoint/model
+   * - sign headers with getRequestHeaders(providerAddress, billedContent)
+   * - call OpenAI with defaultHeaders
    */
   async infer(
     params: OgInferParams
   ): Promise<{ text: string; chatID?: string; provider: string; model: string }> {
-    if (!this.initialized) await this.initialize();
+    if (!this.isInitialized) await this.initialize();
 
-    const svc = this.selectProvider({
-      providerAddress: params.providerAddress,
-      modelHint: params.modelHint || process.env.OG_MODEL_HINT,
-    });
+    // Allow override of provider for this call, still keeping Code A style fields
+    if (params.providerAddress && params.providerAddress !== this.providerAddress) {
+      // Switch provider to requested one, but keep Code A pattern
+      await this.broker.inference.acknowledgeProviderSigner(params.providerAddress);
+      const meta = await this.broker.inference.getServiceMetadata(params.providerAddress);
+      this.providerAddress = params.providerAddress;
+      this.endpoint = meta.endpoint;
+      this.model = meta.model;
+    }
 
-    const { endpoint, model } = await this.broker.inference.getServiceMetadata(svc.provider);
-    await this.broker.inference.acknowledgeProviderSigner(svc.provider);
+    if (!this.providerAddress || !this.endpoint || !this.model) {
+      throw new Error("OgBrokerService is not properly initialized.");
+    }
 
-    // Use the billed content (same as Code A)
-    const userMessage = params.prompt;
+    const billedContent = params.prompt;
 
-    // This call was crashing for you due to missing WebCrypto. Fixed by polyfill above.
-    const headers = await this.broker.inference.getRequestHeaders(svc.provider, userMessage);
+    // Code A: get per-request signed headers
+    const headers = await this.broker.inference.getRequestHeaders(
+      this.providerAddress,
+      billedContent
+    );
 
     const messages =
-      params.messages ??
-      [
-        // Keep it simple & Code-A-like: one user message
-        { role: "user", content: userMessage },
-      ];
+      params.messages ?? [{ role: "user", content: billedContent }];
 
     const openai = new OpenAI({
-      baseURL: endpoint,
-      apiKey: "", // not used by 0G
-      defaultHeaders: { ...headers } as Record<string, string>,
+      baseURL: this.endpoint,
+      apiKey: "", // not required by 0G
+      defaultHeaders: headers as unknown as Record<string, string>,
     });
-
+    
     const completion = await openai.chat.completions.create({
-      model,
+      model: this.model,
       messages,
     });
 
@@ -151,8 +150,8 @@ export class OgBrokerService extends Service {
     return {
       text,
       chatID: (completion as any)?.id,
-      provider: svc.provider,
-      model,
+      provider: this.providerAddress,
+      model: this.model,
     };
   }
 }
