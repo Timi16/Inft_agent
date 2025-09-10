@@ -3,7 +3,7 @@
 
 export type Quantization = "fp32" | "fp16" | "int8";
 
-export interface InftModelCard {
+export interface InftModelEmbed {
   id: string;              // e.g. "Xenova/bge-small-en-v1.5"
   dim: number;             // 384/768/1024...
   normalize: boolean;      // passages are L2-normalized?
@@ -13,6 +13,10 @@ export interface InftModelCard {
   checksum?: string;
 }
 
+export interface InftModel {
+  providerId: string;              // e.g. "Xenova/bge-small-en-v1.5"
+  name?: number;             // 384/768/1024...
+}
 export interface InftCharacter {
   id: string;
   name: string;
@@ -42,7 +46,8 @@ export interface InftEntry {
 export interface InftManifest {
   version: string;
   character: InftCharacter;
-  model: InftModelCard;
+  model: InftModel;
+  e_model: InftModelEmbed;
   entries: InftEntry[];
   vectors_uri?: string;
   vectors_index?: string;

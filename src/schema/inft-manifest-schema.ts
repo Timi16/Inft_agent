@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const InftModelCardSchema = z.object({
+export const InftModelEmbedSchema = z.object({
   id: z.string(),
   dim: z.number().int().positive(),
   normalize: z.boolean(),
@@ -8,6 +8,11 @@ export const InftModelCardSchema = z.object({
   mode: z.literal("passage"),
   quantization: z.enum(["fp32", "fp16", "int8"]).optional(),
   checksum: z.string().optional(),
+});
+
+export const InftModelSchema = z.object({
+  providerId: z.string(),
+  name: z.number().int().positive().optional(),
 });
 
 // 1) Remove the refine here (allow entries without inline vectors)
@@ -41,7 +46,8 @@ export const InftCharacterSchema = z.object({
 export const InftManifestSchema = z.object({
   version: z.string(),
   character: InftCharacterSchema,
-  model: InftModelCardSchema,
+  model: InftModelSchema,
+  e_model: InftModelEmbedSchema,
   entries: z.array(InftEntrySchema).min(1),
   vectors_uri: z.string().optional(),
   vectors_index: z.string().optional(),

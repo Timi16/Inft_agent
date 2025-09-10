@@ -56,33 +56,18 @@ export class OgBrokerService extends Service {
 
   static async start(runtime: IAgentRuntime): Promise<OgBrokerService> {
     const svc = new OgBrokerService(runtime);
-    await svc.initialize();
     return svc;
   }
 
-  async stop(): Promise<void> {}
+  async stop(): Promise<void> { }
 
-  private getSetting(name: string, fallback?: string): string {
-    const v = process.env[name] || this.runtime.getSetting?.(name) || fallback;
-    if (!v) throw new Error(`Missing required env: ${name}`);
-    return v;
-  }
 
-  private async initialize(): Promise<void> {
+ async initialize(signer: Wallet | ethers.JsonRpcSigner): Promise<void> {
     if (this.isInitialized) return;
-
-    this.rpcUrl = this.getSetting("EVM_RPC");
-    this.privateKey = this.getSetting("PRIVATE_KEY");
-
-    // Create provider with explicit ethers reference
-    this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
-    
-    // Create wallet with explicit ethers reference
-    this.wallet = new ethers.Wallet(this.privateKey, this.provider);
 
     try {
       // Create broker - this might need the full ethers context
-      this.broker = await createZGComputeNetworkBroker(this.wallet as any);
+      this.broker = await createZGComputeNetworkBroker(signer);
 
       // Discover services
       this.services = await this.broker.inference.listService();
@@ -102,10 +87,10 @@ export class OgBrokerService extends Service {
       this.isInitialized = true;
       logger.info(`OgBrokerService: initialized; provider=${this.providerAddress}, model=${this.model}`);
     } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error);
-        logger.error(`Inference error: ${msg}`);
-        throw error; // preserves original stack
-}
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`Inference error: ${msg}`);
+      throw error; // preserves original stack
+    }
 
   }
 
@@ -117,9 +102,10 @@ export class OgBrokerService extends Service {
    * - call OpenAI with defaultHeaders
    */
   async infer(
-    params: OgInferParams
+    params: OgInferParams,
+    signer?: Wallet | ethers.JsonRpcSigner
   ): Promise<{ text: string; chatID?: string; provider: string; model: string }> {
-    if (!this.isInitialized) await this.initialize();
+    if (!this.isInitialized) { if (!signer) { throw new Error("please pass in a signer, or call .initialize()") } await this.initialize(signer); }
 
     // Allow override of provider for this call, still keeping Code A style fields
     if (params.providerAddress && params.providerAddress !== this.providerAddress) {
@@ -152,7 +138,7 @@ export class OgBrokerService extends Service {
         apiKey: "dummy-key", // Use a dummy key instead of empty string
         defaultHeaders: headers as unknown as Record<string, string>,
       });
-      
+
       const completion = await openai.chat.completions.create({
         model: this.model,
         messages,
@@ -169,9 +155,9 @@ export class OgBrokerService extends Service {
         model: this.model,
       };
     } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error);
-        logger.error(`Inference error: ${msg}`);
-        throw error; // preserves original stack
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`Inference error: ${msg}`);
+      throw error; // preserves original stack
     }
   }
 }

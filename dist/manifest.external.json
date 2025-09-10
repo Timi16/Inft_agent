@@ -19,7 +19,11 @@
       "k": 2
     }
   },
-  "model": {
+  "model":{
+    "providerId":"0x3feE5a4dd5FDb8a32dDA97Bed899830605dBD9D3",
+    "name":""
+  },
+  "e_model": {
     "id": "Xenova/bge-small-en-v1.5",
     "dim": 384,
     "normalize": true,

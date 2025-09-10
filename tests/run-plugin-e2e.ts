@@ -10,6 +10,7 @@ import { LocalEmbedder } from "../src/services/local-embedder";
 import { RemoteEmbedder } from "../src/services/embedding.service";
 import { OgBrokerService } from "../src/eliza/services/og-broker.service";
 import { start } from "node:repl";
+import { JsonRpcProvider, Wallet } from "ethers";
 
 const dequote = (s?: string | null) =>
   (s ?? "").trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
@@ -37,7 +38,7 @@ async function main() {
   const manifestUri = requireEnv("INFT_MANIFEST_URI");
   const manifest = await loadManifest(manifestUri);
   if (!manifest.vectors_uri) throw new Error("Manifest has no vectors_uri.");
-  logger.info(`Manifest loaded. model=${manifest.model.id} dim=${manifest.model.dim}`);
+  logger.info(`Manifest loaded. model=${manifest.e_model.id} dim=${manifest.e_model.dim}`);
 
   const gateway = process.env.PINATA_GATEWAY;
   const store = await ExternalVectorStore.fromManifestWithExternalVectors(manifest, gateway);
@@ -45,12 +46,12 @@ async function main() {
 
   // 2) Embedder (REMOTE or LOCAL)
   const useRemote = /^1|true$/i.test(String(process.env.USE_REMOTE_EMBEDDER));
-  const modelIdEnv = dequote(process.env.MODEL_ID) || manifest.model.id;
+  const modelIdEnv = dequote(process.env.MODEL_ID) || manifest.e_model.id;
 
-  if (modelIdEnv !== manifest.model.id) {
+  if (modelIdEnv !== manifest.e_model.id) {
     throw new Error(
       `Model contract mismatch:\n` +
-      `  manifest.model.id = ${manifest.model.id}\n` +
+      `  manifest.model.id = ${manifest.e_model.id}\n` +
       `  runtime MODEL_ID   = ${modelIdEnv}\n`
     );
   }
@@ -62,15 +63,15 @@ async function main() {
     embedOne = async (q: string) => {
       const vecs = await remote.embed([q], { mode: "query", instruction: "e5", normalize: true });
       const v = vecs[0];
-      if (v.length !== manifest.model.dim) {
-        throw new Error(`Remote dim ${v.length} != manifest dim ${manifest.model.dim}`);
+      if (v.length !== manifest.e_model.dim) {
+        throw new Error(`Remote dim ${v.length} != manifest dim ${manifest.e_model.dim}`);
       }
       return v;
     };
   } else {
     const local = new LocalEmbedder(modelIdEnv);
     const info = await local.info();
-    ensureModelContract(manifest.model, info);
+    ensureModelContract(manifest.e_model, info);
     embedOne = async (q: string) => {
       const [v] = await local.embed([q], { mode: "query", instruction: "e5", normalize: true });
       return v;
@@ -113,8 +114,15 @@ async function main() {
     return;
   }
 
+
+  const wallet = new Wallet(process.env.PRIVATE_KEY, new JsonRpcProvider(process.env.EVM_RPC))
+
+
+
+
   const og = await (OgBrokerService).start(runtime as any);
-  const res = await og.infer({ prompt });
+  await og.initialize(wallet)
+  const res = await og.infer({ prompt, providerAddress: manifest.model.providerId });
   console.log(res)
   console.log("\n=== 0G Model Reply ===\n");
   console.log(res.text);

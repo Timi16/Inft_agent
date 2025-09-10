@@ -34,11 +34,11 @@ export class InftKnowledgeService extends Service {
   async loadManifest(uri: string) {
     this.manifest = await loadManifest(uri);
     this.store = await ExternalVectorStore.fromManifestWithExternalVectors(this.manifest);
-    this.embedder = new LocalEmbedder(process.env.MODEL_ID || this.manifest.model.id);
+    this.embedder = new LocalEmbedder(process.env.MODEL_ID || this.manifest.e_model.id);
 
     // Check model contract (id/dim)
     const info = await this.embedder.info();
-    ensureModelContract(this.manifest.model, info);
+    ensureModelContract(this.manifest.e_model, info);
 
     logger.info(`InftKnowledgeService: loaded ${this.store.size()} chunks, model=${info.id}`);
   }

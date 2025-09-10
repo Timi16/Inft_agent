@@ -45,7 +45,9 @@ export async function loadManifest(source: string): Promise<InftManifest> {
 
   // Validate with Zod but surface where it failed.
   try {
-    return InftManifestSchema.parse(raw);
+
+    const res =InftManifestSchema.parse(raw);
+    return res
   } catch (e: any) {
     throw new Error(
       `Manifest schema validation failed for "${source}":\n${e?.message ?? e}`,

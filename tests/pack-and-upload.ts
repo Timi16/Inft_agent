@@ -26,7 +26,7 @@ async function main() {
   });
 
   const blob = encodeVectorsBlob(vectors, QUANT);
-  console.log(`Encoded vectors blob: dim=${manifest.model.dim} count=${vectors.length} bytes=${blob.byteLength}`);
+  console.log(`Encoded vectors blob: dim=${manifest.e_model.dim} count=${vectors.length} bytes=${blob.byteLength}`);
 
   const checksum = sha256Hex(blob);
   console.log("SHA-256 checksum:", checksum);
