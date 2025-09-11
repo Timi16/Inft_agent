@@ -1,4 +1,3 @@
-// tests/run-plugin-e2e.ts
 import "dotenv/config";
 import { logger } from "@elizaos/core";
 
@@ -9,7 +8,6 @@ import { ensureModelContract } from "../src/services/contracts";
 import { LocalEmbedder } from "../src/services/local-embedder";
 import { RemoteEmbedder } from "../src/services/embedding.service";
 import { OgBrokerService } from "../src/eliza/services/og-broker.service";
-import { start } from "node:repl";
 import { JsonRpcProvider, Wallet } from "ethers";
 
 const dequote = (s?: string | null) =>
@@ -80,8 +78,7 @@ async function main() {
 
   // 3) Query → search
   const query =
-    process.env.QUERY ||
-    "Give me a concise explanation of the feedback and incentive policies with key points.";
+    "Who Is Eren Yager";
   const q = await embedOne(query);
   normalizeInPlace(q);
 

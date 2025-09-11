@@ -76,8 +76,8 @@ export class ExternalVectorStore {
     const { header, vectors } = decodeVectorsBlob(bytes);
 
     // 4) Contract checks
-    if (header.dim !== manifest.model.dim) {
-      throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.model.dim}`);
+    if (header.dim !== manifest.e_model.dim) {
+      throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.e_model.dim}`);
     }
     if (vectors.length !== manifest.entries.length) {
       throw new Error(`Blob count ${vectors.length} != manifest entries ${manifest.entries.length}`);
@@ -85,9 +85,9 @@ export class ExternalVectorStore {
 
     // 5) Assemble store
     const store = new ExternalVectorStore();
-    store.model.id = manifest.model.id;
-    store.model.dim = manifest.model.dim;
-    store.model.normalize = manifest.model.normalize;
+    store.model.id = manifest.e_model.id;
+    store.model.dim = manifest.e_model.dim;
+    store.model.normalize = manifest.e_model.normalize;
     store.model.instruction = (manifest.model as any).instruction ?? "e5";
 
     for (let i = 0; i < vectors.length; i++) {
