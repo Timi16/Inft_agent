@@ -43,12 +43,44 @@ export function toLocalPath(input: string): string {
   return resolvePath(process.cwd(), s);
 }
 
+function normalizeGatewayHttpUrl(u: string): string {
+  // If someone passed a Pinata subdomain URL without /ipfs/, insert it.
+  // Examples fixed:
+  //   https://SUB.mypinata.cloud/Qm...        -> https://SUB.mypinata.cloud/ipfs/Qm...
+  //   https://gateway.pinata.cloud/Qm...      -> https://gateway.pinata.cloud/ipfs/Qm...
+  try {
+    const url = new URL(u);
+    const host = url.hostname;
+    const path = url.pathname;
+
+    // Matches leading /<cid> or /<cid>/something
+    const cidMatch = path.match(/^\/(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[2-7a-z]{10,})(\/.*)?$/i);
+
+    const isPinataHost =
+      /\.mypinata\.cloud$/i.test(host) ||
+      /(^|\.)pinata\.cloud$/i.test(host); // gateway.pinata.cloud or subdomain
+
+    const hasIpfsPrefix = /^\/ip(fs|ns)\//i.test(path);
+
+    if (isPinataHost && cidMatch && !hasIpfsPrefix) {
+      url.pathname = `/ipfs/${cidMatch[1]}${cidMatch[2] ?? ""}`;
+      return url.toString();
+    }
+
+    // leave other gateways/URLs as-is
+    return url.toString();
+  } catch {
+    return u; // not a valid URL string; leave untouched
+  }
+}
+
 /** Fetch bytes from ipfs/http/file/local path safely */
+
 export async function fetchBytesSmart(uriOrPath: string, gateway?: string): Promise<Uint8Array> {
   const src = dequote(uriOrPath);
 
   if (isIpfsLike(src)) {
-    const url = ipfsToHttp(src, gateway);
+    const url = ipfsToHttp(src, gateway);        // ensures .../ipfs/<cid>
     const r = await fetch(url);
     if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${url}`);
     const ab = await r.arrayBuffer();
@@ -56,8 +88,9 @@ export async function fetchBytesSmart(uriOrPath: string, gateway?: string): Prom
   }
 
   if (isHttpLike(src)) {
-    const r = await fetch(src);
-    if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${src}`);
+    const canonical = normalizeGatewayHttpUrl(src);  // <-- new
+    const r = await fetch(canonical);
+    if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${canonical}`);
     const ab = await r.arrayBuffer();
     return new Uint8Array(ab);
   }

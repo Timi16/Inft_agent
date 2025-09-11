@@ -34,6 +34,24 @@ function toGatewayUrl(ipfsLike: string, gateway?: string) {
   return ipfsLike;
 }
 
+function normalizeGatewayHttpUrl(u: string): string {
+  try {
+    const url = new URL(u);
+    const host = url.hostname;
+    const path = url.pathname;
+    const cidMatch = path.match(/^\/(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[2-7a-z]{10,})(\/.*)?$/i);
+    const isPinataHost = /\.mypinata\.cloud$/i.test(host) || /(^|\.)pinata\.cloud$/i.test(host);
+    const hasIpfsPrefix = /^\/ip(fs|ns)\//i.test(path);
+    if (isPinataHost && cidMatch && !hasIpfsPrefix) {
+      url.pathname = `/ipfs/${cidMatch[1]}${cidMatch[2] ?? ""}`;
+      return url.toString();
+    }
+    return url.toString();
+  } catch {
+    return u;
+  }
+}
+
 export async function loadManifest(
   source: string,
   opts?: { gateway?: string }
@@ -44,15 +62,16 @@ export async function loadManifest(
   const resolved = isIpfsLike(source) ? toGatewayUrl(source, opts?.gateway) : source;
 
   try {
-    if (isHttpUrl(resolved)) {
-      const res = await fetch(resolved, { redirect: "follow" as RequestRedirect });
+     if (isHttpUrl(resolved)) {
+      const url = normalizeGatewayHttpUrl(resolved);   // <-- normalize here
+      const res = await fetch(url, { redirect: "follow" as RequestRedirect });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         throw new Error(`Fetch failed: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}...` : ""}`);
       }
-      // Some gateways can return text/plain; parse manually
       const text = await res.text();
-      raw = JSON.parse(text);
+      const raw = JSON.parse(text);
+      return InftManifestSchema.parse(raw);
     } else if (isFileUrl(resolved)) {
       // Convert file:// to a real filesystem path (Windows-safe).
       const p = fileURLToPath(resolved);
