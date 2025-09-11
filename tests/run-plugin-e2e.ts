@@ -5,7 +5,6 @@ import { normalizeInPlace } from "../src/utils/cosine";
 import { RemoteEmbedder } from "../src/services/embedding.service";
 import { Wallet, JsonRpcProvider } from "ethers";
 import { OgBrokerService } from "../src/eliza/services/og-broker.service";
-import { createHash } from "node:crypto";
 
 const GATEWAY = "https://violet-deliberate-fly-257.mypinata.cloud";
 const MANIFEST_CID = "QmTckaLnmAyDLyhsSQqGwkVRmYqyVcxW5Cjptz9fFgjPqn";
@@ -24,20 +23,6 @@ const requireNonEmpty = (name: string, v: string) => {
 const gatewayJoin = (base: string, cidOrPath: string) =>
   `${base.replace(/\/+$/, "")}/ipfs/${cidOrPath.replace(/^\/+/, "")}`;
 
-const extractCid = (ipfsLike: string) =>
-  ipfsLike.replace(/^ipfs:\/\//i, "").replace(/^\/?ipfs\//i, "");
-
-const fetchBytes = async (url: string) => {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`fetchBytes: ${r.status} ${r.statusText} for ${url}`);
-  return new Uint8Array(await r.arrayBuffer());
-};
-
-const sha256Hex = (u8: Uint8Array) => {
-  const h = createHash("sha256");
-  h.update(u8);
-  return "sha256:" + h.digest("hex");
-};
 
 async function main() {
   logger.info("=== iNFT + Remote Embedder + 0G (IPFS-only) ===");

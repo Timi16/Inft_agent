@@ -39,8 +39,6 @@
     "quantization": "fp16"
   },
 
-  "gateways": ["https://violet-deliberate-fly-257.mypinata.cloud"],
-
   "entries": [
     {
       "id": "ks#corps",
