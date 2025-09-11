@@ -121,7 +121,7 @@ async function remoteEmbedBatch(
 
 // ---- Main ----
 async function main() {
-  const inputPath = resolve("C:/Users/A/Documents/inft-agent/tests/sample-manifest.json")
+  const inputPath = resolve("C:/Users/A/Documents/inft-agent/tests/demon-slayer-manifest.json")
   const PINATA_JWT = env("PINATA_JWT");
   if (!inputPath) throw new Error("INPUT_MANIFEST is required");
   if (!PINATA_JWT) throw new Error("PINATA_JWT is required");
@@ -210,6 +210,8 @@ async function main() {
     // Upload vectors.bin
     vectorsCID = await pinFileToIPFS_JWT(vectorsBin, "vectors.bin", PINATA_JWT);
     console.log(`[ipfs] vectors CID: ${vectorsCID}`);
+
+    console.log("vectorsCheckSum",vectorsChecksum)
   }
 
   // Build final manifest with ipfs:// vectors (if we produced/require them)

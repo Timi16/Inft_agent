@@ -1,0 +1,115 @@
+{
+  "version": "1.0",
+  "character": {
+    "id": "agent-demonslayer",
+    "name": "Demon Slayer Analyst",
+    "username": "kimetsu_helper",
+    "bio": [
+      "Lore-focused assistant for Demon Slayer: Kimetsu no Yaiba.",
+      "Answers questions about characters, Corps structure and major arcs."
+    ],
+    "system": "Stay spoiler-aware if asked. Cite retrieved snippets inline like [1],[2]. Keep answers concise and grounded in the provided knowledge.",
+    "adjectives": ["precise", "lore-savvy", "concise"],
+    "topics": ["hashira", "breathing styles", "muzan", "twelve kizuki", "nichirin blades", "final selection", "arcs", "characters"],
+    "knowledge": ["data/kimetsu/"],
+    "messageExamples": [
+      ["user: Who is Kyojuro Rengoku?", "assistant: Rengoku is the Flame Hashira, known for passionate resolve and mastery of Flame Breathing [2]."],
+      ["user: What’s Sun Breathing?", "assistant: The original breathing style derived from the Hinokami Kagura; other styles branched from it [3]."]
+    ],
+    "postExamples": [
+      "Fact: Nichirin blades change color based on the wielder—often hinting at specialty or temperament. #KimetsuNoYaiba"
+    ],
+    "style": { "tone": "analytical", "cite": "numeric-brackets" },
+    "plugins": [],
+    "settings": { "k": 4 },
+    "secrets": {}
+  },
+
+  "model": {
+    "providerId": "0x3feE5a4dd5FDb8a32dDA97Bed899830605dBD9D3",
+    "name": 1
+  },
+
+  "e_model": {
+    "id": "Xenova/bge-small-en-v1.5",
+    "dim": 384,
+    "normalize": true,
+    "instruction": "e5",
+    "mode": "passage",
+    "quantization": "fp16"
+  },
+
+  "gateways": ["https://violet-deliberate-fly-257.mypinata.cloud"],
+
+  "entries": [
+    {
+      "id": "ks#corps",
+      "type": "knowledge",
+      "text": "The Demon Slayer Corps is a private organization that hunts demons under a leader, with elite swordsmen called Hashira.",
+      "meta": { "source": "kimetsu/overview.md", "section": "Corps", "tags": ["organization"] }
+    },
+    {
+      "id": "ks#hashira",
+      "type": "knowledge",
+      "text": "Hashira (Pillars) are the Corps’ top swordsmen; each represents a breathing style specialty and commands squads.",
+      "meta": { "source": "kimetsu/overview.md", "section": "Hashira", "tags": ["organization", "ranks"] }
+    },
+    {
+      "id": "ks#breathing",
+      "type": "knowledge",
+      "text": "Breathing Styles are sword arts that enhance physical ability using focused breathing; core styles include Water, Flame, Wind, Thunder, Stone, and derivatives.",
+      "meta": { "source": "kimetsu/breathing.md", "section": "Breathing Styles", "tags": ["combat"] }
+    },
+    {
+      "id": "ks#sun-breathing",
+      "type": "knowledge",
+      "text": "Sun Breathing (Hinokami Kagura) is the original style from which others branched; it emphasizes relentless, rhythmic forms.",
+      "meta": { "source": "kimetsu/breathing.md", "section": "Sun Breathing", "tags": ["combat", "origins"] }
+    },
+    {
+      "id": "ks#nichirin",
+      "type": "knowledge",
+      "text": "Nichirin blades are forged from sunlight-absorbing ore; blade color changes with the wielder and affects combat characteristics.",
+      "meta": { "source": "kimetsu/tech.md", "section": "Nichirin Blades", "tags": ["gear"] }
+    },
+    {
+      "id": "ks#muzan",
+      "type": "knowledge",
+      "text": "Muzan Kibutsuji is the progenitor of demons; his blood creates demons and empowers the Twelve Kizuki.",
+      "meta": { "source": "kimetsu/antagonists.md", "section": "Muzan", "tags": ["antagonist"] }
+    },
+    {
+      "id": "ks#twelve-kizuki",
+      "type": "knowledge",
+      "text": "The Twelve Kizuki are Muzan’s strongest demons divided into Upper and Lower Moons; they wield distinct Blood Demon Arts.",
+      "meta": { "source": "kimetsu/antagonists.md", "section": "Twelve Kizuki", "tags": ["antagonist", "ranks"] }
+    },
+    {
+      "id": "ks#final-selection",
+      "type": "knowledge",
+      "text": "Final Selection is the Corps’ survival test on Mount Fujikasane where candidates must endure demon attacks to qualify.",
+      "meta": { "source": "kimetsu/training.md", "section": "Final Selection", "tags": ["training", "exam"] }
+    },
+    {
+      "id": "ks#tanjiro",
+      "type": "knowledge",
+      "text": "Tanjiro Kamado joins the Corps to cure his sister Nezuko; begins with Water Breathing and later learns Hinokami Kagura forms.",
+      "meta": { "source": "kimetsu/characters.md", "section": "Tanjiro", "tags": ["character", "protagonist"] }
+    },
+    {
+      "id": "ks#nezuko",
+      "type": "knowledge",
+      "text": "Nezuko Kamado is turned into a demon yet retains protective instincts; she fights using demonic strength and Blood Demon Art flames.",
+      "meta": { "source": "kimetsu/characters.md", "section": "Nezuko", "tags": ["character"] }
+    },
+    {
+      "id": "ks#infinity-train",
+      "type": "knowledge",
+      "text": "The Mugen (Infinity) Train incident involves a demon manipulating dreams; Rengoku plays a pivotal role defending passengers.",
+      "meta": { "source": "kimetsu/arcs.md", "section": "Infinity Train", "tags": ["arc", "event"] }
+    }
+  ],
+  "vectors_uri": "ipfs://Qmazaj6U9xYwzEQjiv1z2BvZUBnU42UAGxaSYtXe7RV4RM",
+  "vectors_checksum": "sha256:c0b1e088bf7fec3d9dcb0774b8f0d1690f466eed3628384027881ad69367b345",
+  "license": "CC-BY-NC"
+}

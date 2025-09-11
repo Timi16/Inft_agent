@@ -48,7 +48,6 @@
   ],
 
   "vectors_uri": "ipfs://QmNzfYPBmpqXFGzs53n2wTUB7Y6eBtvWNw6ZpRaAg3SEmj",
-  "gateways": ["https://violet-deliberate-fly-257.mypinata.cloud", "https://ipfs.io"],
-
+  "vectors_checksum":"sha256:0f06bfee668eb9f7f23b01937a6a90847dccfecaaa450b0fa7f0c7ca8d4b4b82",
   "license": "CC-BY-NC"
 }
