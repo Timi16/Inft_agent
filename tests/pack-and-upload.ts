@@ -96,7 +96,7 @@ async function pinJSONToIPFS_JWT(obj: unknown, jwt: string): Promise<string> {
   return cid;
 }
 
-// ---- Remote embeddings (your Fastify @ /v1/embeddings) ----
+// ---- Remote embeddings  ----
 async function remoteEmbedBatch(
   baseUrl: string,
   texts: string[],

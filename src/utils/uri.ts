@@ -1,102 +1,133 @@
 // src/utils/uri.ts
+// URI helpers + robust fetchers for IPFS/http/file, with Pinata gateway normalization.
+
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import path from "node:path";
 
-const dequote = (s?: string | null) => (s ?? "").trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
-
-export const isHttpLike = (u: string) => /^https?:\/\//i.test(u);
-export const isIpfsLike = (u: string) => /^ipfs:\/\//i.test(u);
-export const isFileLike = (u: string) => /^file:/i.test(u);
-export const isWinAbs = (p: string) => /^[a-zA-Z]:[\\/]/.test(p);
-
-/** ipfs://… → http(s) gateway url */
-export function ipfsToHttp(ipfsUri: string, gateway?: string) {
-  const gw = (gateway || process.env.PINATA_GATEWAY || process.env.IPFS_GATEWAY || "https://ipfs.io/ipfs/").replace(/\/+$/, "");
-  const path = ipfsUri.replace(/^ipfs:\/\//i, "");
-  return `${gw}/${path}`;
+/** Strip surrounding single/double quotes */
+export function dequote(s?: string | null): string {
+  return (s ?? "").trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
 }
 
-/** Normalize anything "file-ish" into a real local path */
-export function toLocalPath(input: string): string {
-  let s = dequote(input);
-
-  // fix invalid variants like "file:\C:\..." or "file:/C:/..."
-  if (/^file:\\/i.test(s) || /^file:\/(?!\/)/i.test(s)) {
-    s = s.replace(/^file:\\/i, "file:///").replace(/^file:\//i, "file:///");
-  }
-
-  if (isFileLike(s)) {
-    // Proper file URL → convert via WHATWG URL
-    try {
-      return fileURLToPath(new URL(s));
-    } catch {
-      // fallback: strip file: and leading slashes/backslashes
-      let p = s.replace(/^file:/i, "").replace(/^[\/\\]+/, "");
-      return p;
-    }
-  }
-
-  // plain path
-  if (isWinAbs(s) || isAbsolute(s)) return s;
-  // relative path → resolve against CWD
-  return resolvePath(process.cwd(), s);
+/** http(s)://... */
+export function isHttpLike(u: string): boolean {
+  return /^https?:\/\//i.test(u);
 }
 
-function normalizeGatewayHttpUrl(u: string): string {
-  // If someone passed a Pinata subdomain URL without /ipfs/, insert it.
-  // Examples fixed:
-  //   https://SUB.mypinata.cloud/Qm...        -> https://SUB.mypinata.cloud/ipfs/Qm...
-  //   https://gateway.pinata.cloud/Qm...      -> https://gateway.pinata.cloud/ipfs/Qm...
+/** file://... */
+export function isFileLike(u: string): boolean {
+  return /^file:\/\//i.test(u);
+}
+
+/** CIDv0/v1 quick tests */
+export function looksLikeCid(s: string): boolean {
+  return /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(s) || /^bafy[2-7a-z]{10,}$/i.test(s);
+}
+
+/** ipfs://, /ipfs/<cid>, or bare CID */
+export function isIpfsLike(s: string): boolean {
+  return /^ipfs:\/\//i.test(s) || /^\/?ipfs\//i.test(s) || looksLikeCid(s);
+}
+
+/** Convert ipfs://<cid>/path OR bare CID to HTTP gateway URL (.../ipfs/<cid>/path) */
+export function ipfsToHttp(ipfsLike: string, gateway?: string): string {
+  const base = (gateway || process.env.PINATA_GATEWAY || "https://ipfs.io").replace(/\/+$/, "");
+  if (/^ipfs:\/\//i.test(ipfsLike)) {
+    const rest = ipfsLike.replace(/^ipfs:\/\//i, ""); // "<cid>/path?"
+    return `${base}/ipfs/${rest}`;
+  }
+  if (/^\/?ipfs\//i.test(ipfsLike)) {
+    const rest = ipfsLike.replace(/^\/?ipfs\//i, "");
+    return `${base}/ipfs/${rest}`;
+  }
+  if (looksLikeCid(ipfsLike)) {
+    return `${base}/ipfs/${ipfsLike}`;
+  }
+  return ipfsLike;
+}
+
+/** For http(s) URLs hitting Pinata gateways without /ipfs/, insert it. */
+export function normalizeGatewayHttpUrl(u: string): string {
   try {
     const url = new URL(u);
     const host = url.hostname;
     const path = url.pathname;
 
-    // Matches leading /<cid> or /<cid>/something
-    const cidMatch = path.match(/^\/(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[2-7a-z]{10,})(\/.*)?$/i);
-
-    const isPinataHost =
+    // Dedicated gateway hosts
+    const isPinata =
       /\.mypinata\.cloud$/i.test(host) ||
-      /(^|\.)pinata\.cloud$/i.test(host); // gateway.pinata.cloud or subdomain
+      /(^|\.)pinata\.cloud$/i.test(host);
 
     const hasIpfsPrefix = /^\/ip(fs|ns)\//i.test(path);
 
-    if (isPinataHost && cidMatch && !hasIpfsPrefix) {
-      url.pathname = `/ipfs/${cidMatch[1]}${cidMatch[2] ?? ""}`;
+    // path like "/<cid>" or "/<cid>/...":
+    const m = path.match(/^\/(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[2-7a-z]{10,})(\/.*)?$/i);
+
+    if (isPinata && !hasIpfsPrefix && m) {
+      const tail = m[2] ?? "";
+      url.pathname = `/ipfs/${m[1]}${tail}`;
       return url.toString();
     }
-
-    // leave other gateways/URLs as-is
     return url.toString();
   } catch {
-    return u; // not a valid URL string; leave untouched
+    return u;
   }
 }
 
-/** Fetch bytes from ipfs/http/file/local path safely */
+/** file:// URL -> local fs path; otherwise return as-is (relative -> CWD absolute) */
+export function toLocalPath(u: string): string {
+  if (isFileLike(u)) return fileURLToPath(u);
+  // Normalize relative paths to absolute
+  if (!path.isAbsolute(u)) return path.resolve(process.cwd(), u);
+  return u;
+}
 
+/** Fetch raw bytes from ipfs/http/file with all normalizations applied. */
 export async function fetchBytesSmart(uriOrPath: string, gateway?: string): Promise<Uint8Array> {
   const src = dequote(uriOrPath);
 
   if (isIpfsLike(src)) {
-    const url = ipfsToHttp(src, gateway);        // ensures .../ipfs/<cid>
+    // Always force .../ipfs/<cid> on chosen gateway
+    const url = ipfsToHttp(src, gateway);
     const r = await fetch(url);
     if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${url}`);
-    const ab = await r.arrayBuffer();
-    return new Uint8Array(ab);
+    return new Uint8Array(await r.arrayBuffer());
   }
 
   if (isHttpLike(src)) {
-    const canonical = normalizeGatewayHttpUrl(src);  // <-- new
-    const r = await fetch(canonical);
-    if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${canonical}`);
-    const ab = await r.arrayBuffer();
-    return new Uint8Array(ab);
+    // If it's a Pinata URL missing /ipfs/, fix it.
+    const url = normalizeGatewayHttpUrl(src);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`fetchBytesSmart: ${r.status} ${r.statusText} for ${url}`);
+    return new Uint8Array(await r.arrayBuffer());
   }
 
   // file:// or plain local path
-  const path = toLocalPath(src);
-  const buf = await readFile(path);
+  const p = toLocalPath(src);
+  const buf = await readFile(p);
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+}
+
+/** Fetch text/JSON helpers (optional but handy) */
+export async function fetchJsonSmart<T = unknown>(uriOrPath: string, gateway?: string): Promise<T> {
+  const src = dequote(uriOrPath);
+
+  if (isIpfsLike(src)) {
+    const url = ipfsToHttp(src, gateway);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`fetchJsonSmart: ${r.status} ${r.statusText} for ${url}`);
+    return (await r.json()) as T;
+  }
+
+  if (isHttpLike(src)) {
+    const url = normalizeGatewayHttpUrl(src);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`fetchJsonSmart: ${r.status} ${r.statusText} for ${url}`);
+    return (await r.json()) as T;
+  }
+
+  const p = toLocalPath(src);
+  const text = await readFile(p, "utf8");
+  return JSON.parse(text) as T;
 }

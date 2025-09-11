@@ -1,135 +1,143 @@
 // src/services/external-store.ts
-// ExternalVectorStore: load vectors from external URI, verify checksum, decode, and provide search.
-// Supports IPFS (via gateway), HTTP(S), local file URLs, and bare file paths.
+// Vector store backed by external "vectors.bin" referenced in manifest.vectors_uri.
+// Loads bytes from ipfs/http/file via fetchBytesSmart, decodes them, and supports cosine search.
 
-import { fetchBytesSmart, isHttpLike, isIpfsLike, isFileLike, toLocalPath } from "../utils/uri";
-import { cosine, normalizeInPlace } from "../utils/cosine";
-import { sha256Hex } from "../utils/hash";
-import { decodeVectorsBlob } from "./binary.vector"
-
-// Prefer your shared types if present
 import type { InftManifest } from "../types";
-// If you don't have VectorHit defined centrally, uncomment this:
-// export type VectorHit = { id: string; score: number; text: string; meta?: Record<string, unknown> };
+import { fetchBytesSmart, isIpfsLike, ipfsToHttp, normalizeGatewayHttpUrl } from "../utils/uri";
+import { normalizeInPlace } from "../utils/cosine";
+
+// If you already have a decoder, import it. The function should accept Uint8Array and return Float32Array[].
+// Adjust the import/name below to match your project.
+import { decodeVectorsBlob } from "./binary.vector"; // <-- ensure this exists
+
+export type SearchHit = {
+  index: number;
+  score: number; // cosine similarity if vectors are normalized
+  text: string;
+  id?: string | number;
+};
 
 export class ExternalVectorStore {
-  readonly model = {
-    id: "",
-    dim: 0,
-    normalize: true,
-    instruction: "e5" as "e5" | "none",
-  };
+  private vecs: Float32Array[];
+  private texts: string[];
+  private ids: (string | number | undefined)[];
+  private dim: number;
+  private normalized: boolean;
 
-  private vectors: Float32Array[] = [];
-  private texts: string[] = [];
-  private metas: (Record<string, unknown> | undefined)[] = [];
-  private ids: string[] = [];
+  private constructor(opts: {
+    vecs: Float32Array[];
+    texts: string[];
+    ids: (string | number | undefined)[];
+    dim: number;
+    normalized: boolean;
+  }) {
+    this.vecs = opts.vecs;
+    this.texts = opts.texts;
+    this.ids = opts.ids;
+    this.dim = opts.dim;
+    this.normalized = opts.normalized;
+  }
 
-  /**
-   * Load an ExternalVectorStore from a manifest that references an external vectors blob.
-   * - Fetches bytes via ipfs/http/file/local path
-   * - Verifies checksum (if provided)
-   * - Decodes blob and checks (dim,count) against manifest
-   * - Populates in-memory vectors + metadata
-   *
-   * NOTE on relative vectors_uri:
-   * If your manifest uses a relative vectors_uri (e.g. "vectors.bin"), you can
-   * attach `__source_uri__` (the manifest's own URI) in loadManifest so we can
-   * resolve relative paths against the manifest directory here.
-   */
   static async fromManifestWithExternalVectors(
-    manifest: InftManifest & { __source_uri__?: string },
+    manifest: InftManifest,
     gateway?: string
   ): Promise<ExternalVectorStore> {
-    const raw = (manifest.vectors_uri || "").trim();
-    if (!raw) throw new Error("Manifest has no vectors_uri");
-
-    // Do NOT resolve/join if already absolute (ipfs/http/file/absolute path)
-    const isWinAbs = /^[a-zA-Z]:[\\/]/.test(raw);
-    const isUnixAbs = raw.startsWith("/");
-    const needsBase = !isHttpLike(raw) && !isIpfsLike(raw) && !isFileLike(raw) && !isWinAbs && !isUnixAbs;
-
-    let resolved = raw;
-    if (needsBase && manifest.__source_uri__) {
-      // If your loader sets __source_uri__ (the manifest path/URL),
-      // you can resolve a relative vectors_uri against its directory here.
-      // Example (if you want this behavior):
-      //   const baseDir = path.dirname(toLocalPath(manifest.__source_uri__));
-      //   resolved = path.resolve(baseDir, raw);
-      // For now, we keep `resolved = raw` to avoid surprises.
-      resolved = raw;
+    const vectorsUri: string | undefined =
+      (manifest as any).vectors_uri || (manifest as any).vectorsUrl || (manifest as any).vectors;
+    if (!vectorsUri) {
+      throw new Error("Manifest has no vectors_uri/vectorsUrl/vectors.");
     }
 
-    // 1) Fetch bytes (ipfs/http/file/path)
-    const bytes = await fetchBytesSmart(resolved, gateway);
-
-    // 2) Checksum verify (supports manifest.vectors_checksum or model.checksum)
-    const expected = manifest.vectors_checksum || (manifest.model as any)?.checksum;
-    if (expected) {
-      const got = sha256Hex(bytes);
-      if (got !== expected) {
-        throw new Error(`Vectors checksum mismatch: got=${got} expected=${expected}`);
-      }
+    // Build the final URL/path to load bytes
+    let src = vectorsUri;
+    if (isIpfsLike(src)) {
+      src = ipfsToHttp(src, gateway);
+    } else if (/^https?:\/\//i.test(src)) {
+      src = normalizeGatewayHttpUrl(src);
     }
 
-    // 3) Decode vectors blob
-    const { header, vectors } = decodeVectorsBlob(bytes);
+    const bytes = await fetchBytesSmart(src, gateway);
 
-    // 4) Contract checks
-    if (header.dim !== manifest.e_model.dim) {
-      throw new Error(`Blob dim ${header.dim} != manifest dim ${manifest.e_model.dim}`);
-    }
-    if (vectors.length !== manifest.entries.length) {
-      throw new Error(`Blob count ${vectors.length} != manifest entries ${manifest.entries.length}`);
-    }
+    // Decode vectors.bin → Float32Array[] (adjust to your decoder's API if needed)
+    const decoded: any = decodeVectorsBlob(bytes);
+    const vecs: Float32Array[] = Array.isArray(decoded)
+      ? decoded
+      : (decoded?.vectors || decoded?.vecs);
 
-    // 5) Assemble store
-    const store = new ExternalVectorStore();
-    store.model.id = manifest.e_model.id;
-    store.model.dim = manifest.e_model.dim;
-    store.model.normalize = manifest.e_model.normalize;
-    store.model.instruction = (manifest.model as any).instruction ?? "e5";
-
-    for (let i = 0; i < vectors.length; i++) {
-      const v = vectors[i];
-      // If vectors were not normalized at pack-time, normalize now for cosine correctness.
-      if (!store.model.normalize) normalizeInPlace(v);
-
-      store.vectors.push(v);
-
-      const entry = manifest.entries[i] as any;
-      store.texts.push(entry.text);
-      store.metas.push(entry.meta);
-      store.ids.push(entry.id);
+    if (!Array.isArray(vecs) || vecs.length === 0) {
+      throw new Error("Failed to decode vectors: empty or invalid vectors.bin.");
     }
 
-    return store;
+    // Text + IDs from manifest entries
+    const entries: any[] = Array.isArray((manifest as any).entries) ? (manifest as any).entries : [];
+    const texts = entries.map((e) => String(e.text ?? e.content ?? ""));
+    const ids = entries.map((e, i) => e.id ?? e._id ?? i);
+
+    // If mismatch, trim to the smaller length (common when filtering entries elsewhere)
+    const n = Math.min(vecs.length, texts.length || vecs.length);
+    const vecsN = vecs.slice(0, n);
+    const textsN = (texts.length ? texts : new Array(vecs.length).fill("")).slice(0, n);
+    const idsN = ids.slice(0, n);
+
+    // Normalize vectors if required by the manifest contract
+    const shouldNormalize = Boolean((manifest as any).e_model?.normalize);
+    if (shouldNormalize) {
+      for (const v of vecsN) normalizeInPlace(v);
+    }
+
+    const dim = (manifest as any).e_model?.dim ?? (vecsN[0]?.length ?? 0);
+    if (!dim) throw new Error("Cannot determine vector dimension.");
+
+    return new ExternalVectorStore({
+      vecs: vecsN,
+      texts: textsN,
+      ids: idsN,
+      dim,
+      normalized: shouldNormalize,
+    });
   }
 
   size(): number {
-    return this.vectors.length;
+    return this.vecs.length;
   }
 
-  /**
-   * Brute-force cosine search (works fine for small KBs; swap for HNSW later if needed).
-   * Ensure query vector is normalized before calling for optimal cosine scores.
-   */
-  search(
-    queryVec: Float32Array,
-    k = 8,
-    filter?: (meta?: Record<string, unknown>) => boolean
-  ) {
-    const scores: { i: number; s: number }[] = [];
-    for (let i = 0; i < this.vectors.length; i++) {
-      if (filter && !filter(this.metas[i])) continue;
-      scores.push({ i, s: cosine(queryVec, this.vectors[i]) });
+  /** Search by cosine similarity (if vectors are normalized, dot == cosine). */
+  search(query: Float32Array, topK = 5): SearchHit[] {
+    if (query.length !== this.dim) {
+      throw new Error(`Query dim ${query.length} != store dim ${this.dim}`);
     }
-    scores.sort((a, b) => b.s - a.s);
-    return scores.slice(0, Math.min(k, scores.length)).map(({ i, s }) => ({
-      id: this.ids[i],
-      score: s,
-      text: this.texts[i],
-      meta: this.metas[i],
-    }));
+
+    const q = new Float32Array(query); // copy (may already be normalized)
+    if (!this.normalized) {
+      // If stored vectors aren't normalized, compute cosine by normalizing q and each vector.
+      normalizeInPlace(q);
+    }
+
+    // Compute scores
+    const scores: number[] = new Array(this.vecs.length);
+    for (let i = 0; i < this.vecs.length; i++) {
+      const v = this.vecs[i];
+      let s = 0;
+      const L = this.dim;
+      for (let j = 0; j < L; j++) s += q[j] * v[j];
+      scores[i] = s;
+    }
+
+    // Arg-sort topK
+    const idxs = scores.map((_, i) => i);
+    idxs.sort((a, b) => scores[b] - scores[a]);
+    const K = Math.min(topK, idxs.length);
+
+    const hits: SearchHit[] = [];
+    for (let r = 0; r < K; r++) {
+      const i = idxs[r];
+      hits.push({
+        index: i,
+        score: scores[i],
+        text: this.texts[i] ?? "",
+        id: this.ids[i],
+      });
+    }
+    return hits;
   }
 }

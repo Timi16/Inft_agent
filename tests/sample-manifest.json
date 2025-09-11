@@ -13,14 +13,8 @@
     "topics": ["titans", "walls", "survey corps", "marley", "paths", "timeline", "characters"],
     "knowledge": ["data/aot/"],
     "messageExamples": [
-      [
-        "user: Who is Levi Ackerman?",
-        "assistant: Levi is a captain of the Survey Corps known for elite ODM skill and decisive leadership [3]."
-      ],
-      [
-        "user: What are the Walls?",
-        "assistant: Three concentric fortifications—Maria, Rose, and Sina—protect humanity from Titans [1]."
-      ]
+      ["user: Who is Levi Ackerman?", "assistant: Levi is a captain of the Survey Corps known for elite ODM skill and decisive leadership [3]."],
+      ["user: What are the Walls?", "assistant: Three concentric fortifications—Maria, Rose, and Sina—protect humanity from Titans [1]."]
     ],
     "postExamples": [
       "AoT fact: The three Walls are named after Ymir’s daughters—Maria, Rose, and Sina. #AoT"
@@ -30,12 +24,10 @@
     "settings": { "k": 4 },
     "secrets": {}
   },
-
   "model": {
     "providerId": "0x3feE5a4dd5FDb8a32dDA97Bed899830605dBD9D3",
     "name": 1
   },
-
   "e_model": {
     "id": "Xenova/bge-small-en-v1.5",
     "dim": 384,
@@ -44,57 +36,19 @@
     "mode": "passage",
     "quantization": "fp16"
   },
-
   "entries": [
-    {
-      "id": "aot#walls",
-      "type": "knowledge",
-      "text": "The three Walls—Maria (outer), Rose (middle), and Sina (inner)—are concentric fortifications that shield humanity from Titans.",
-      "meta": { "source": "aot/overview.md", "section": "Walls", "tags": ["world", "infrastructure"] }
-    },
-    {
-      "id": "aot#survey-corps",
-      "type": "knowledge",
-      "text": "The Survey Corps (Scouts) conducts expeditions outside the Walls to study Titans and reclaim territory; they value agility, initiative, and teamwork.",
-      "meta": { "source": "aot/organizations.md", "section": "Survey Corps", "tags": ["organization"] }
-    },
-    {
-      "id": "aot#levi",
-      "type": "knowledge",
-      "text": "Levi Ackerman is a captain of the Survey Corps, renowned for exceptional ODM combat skill, tactical clarity, and leadership under pressure.",
-      "meta": { "source": "aot/characters.md", "section": "Levi Ackerman", "tags": ["character", "scouts"] }
-    },
-    {
-      "id": "aot#titan-types",
-      "type": "knowledge",
-      "text": "Titans vary: Pure Titans act instinctively; Abnormals behave unpredictably; Titan Shifters can transform and retain intelligence and strategy.",
-      "meta": { "source": "aot/titans.md", "section": "Titan Types", "tags": ["titans"] }
-    },
-    {
-      "id": "aot#paths",
-      "type": "knowledge",
-      "text": "Paths is a metaphysical network connecting Subjects of Ymir across time and space, enabling coordinate-like influence and the transmission of traits.",
-      "meta": { "source": "aot/lore.md", "section": "Paths", "tags": ["lore"] }
-    },
-    {
-      "id": "aot#trost",
-      "type": "knowledge",
-      "text": "The Battle of Trost District is an early operation where coordinated tactics and resourcefulness prevent a catastrophic breach from expanding.",
-      "meta": { "source": "aot/events.md", "section": "Battle of Trost", "tags": ["event"] }
-    },
-    {
-      "id": "aot#marley-paradis",
-      "type": "knowledge",
-      "text": "Marley and Paradis Island are opposing powers; conflict spans ideology, resources, and the control of Titan power across generations.",
-      "meta": { "source": "aot/overview.md", "section": "Marley vs Paradis", "tags": ["factions", "conflict"] }
-    },
-    {
-      "id": "aot#odm-gear",
-      "type": "knowledge",
-      "text": "Omni-Directional Mobility (ODM) gear enables rapid 3D maneuvering using gas-propelled grapples; critical weaknesses of Titans are targeted at the nape.",
-      "meta": { "source": "aot/tech.md", "section": "ODM Gear", "tags": ["technology"] }
-    }
+    { "id": "aot#walls", "type": "knowledge", "text": "The three Walls—Maria (outer), Rose (middle), and Sina (inner)—are concentric fortifications that shield humanity from Titans.", "meta": { "source": "aot/overview.md", "section": "Walls", "tags": ["world", "infrastructure"] } },
+    { "id": "aot#survey-corps", "type": "knowledge", "text": "The Survey Corps (Scouts) conducts expeditions outside the Walls to study Titans and reclaim territory; they value agility, initiative, and teamwork.", "meta": { "source": "aot/organizations.md", "section": "Survey Corps", "tags": ["organization"] } },
+    { "id": "aot#levi", "type": "knowledge", "text": "Levi Ackerman is a captain of the Survey Corps, renowned for exceptional ODM combat skill, tactical clarity, and leadership under pressure.", "meta": { "source": "aot/characters.md", "section": "Levi Ackerman", "tags": ["character", "scouts"] } },
+    { "id": "aot#titan-types", "type": "knowledge", "text": "Titans vary: Pure Titans act instinctively; Abnormals behave unpredictably; Titan Shifters can transform and retain intelligence and strategy.", "meta": { "source": "aot/titans.md", "section": "Titan Types", "tags": ["titans"] } },
+    { "id": "aot#paths", "type": "knowledge", "text": "Paths is a metaphysical network connecting Subjects of Ymir across time and space, enabling coordinate-like influence and the transmission of traits.", "meta": { "source": "aot/lore.md", "section": "Paths", "tags": ["lore"] } },
+    { "id": "aot#trost", "type": "knowledge", "text": "The Battle of Trost District is an early operation where coordinated tactics and resourcefulness prevent a catastrophic breach from expanding.", "meta": { "source": "aot/events.md", "section": "Battle of Trost", "tags": ["event"] } },
+    { "id": "aot#marley-paradis", "type": "knowledge", "text": "Marley and Paradis Island are opposing powers; conflict spans ideology, resources, and the control of Titan power across generations.", "meta": { "source": "aot/overview.md", "section": "Marley vs Paradis", "tags": ["factions", "conflict"] } },
+    { "id": "aot#odm-gear", "type": "knowledge", "text": "Omni-Directional Mobility (ODM) gear enables rapid 3D maneuvering using gas-propelled grapples; critical weaknesses of Titans are targeted at the nape.", "meta": { "source": "aot/tech.md", "section": "ODM Gear", "tags": ["technology"] } }
   ],
+
+  "vectors_uri": "ipfs://QmNzfYPBmpqXFGzs53n2wTUB7Y6eBtvWNw6ZpRaAg3SEmj",
+  "gateways": ["https://violet-deliberate-fly-257.mypinata.cloud", "https://ipfs.io"],
 
   "license": "CC-BY-NC"
 }

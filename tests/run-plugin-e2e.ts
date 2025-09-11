@@ -1,134 +1,114 @@
-import "dotenv/config";
+#!/usr/bin/env tsx
 import { logger } from "@elizaos/core";
-
 import { loadManifest } from "../src/services/inft-loader-service";
 import { ExternalVectorStore } from "../src/services/external-store";
 import { normalizeInPlace } from "../src/utils/cosine";
-import { ensureModelContract } from "../src/services/contracts";
-import { LocalEmbedder } from "../src/services/local-embedder";
 import { RemoteEmbedder } from "../src/services/embedding.service";
-import { OgBrokerService } from "../src/eliza/services/og-broker.service";
-import { JsonRpcProvider, Wallet } from "ethers";
+import { fetchBytesSmart, isIpfsLike, ipfsToHttp } from "../src/utils/uri";
+import { createHash } from "node:crypto";
 
-const dequote = (s?: string | null) =>
-  (s ?? "").trim().replace(/^[\'\"]+|[\'\"]+$/g, "");
+// =====================
+// REQUIRED CONSTANTS
+// =====================
+// Pinata subdomain gateway (NO fallback). Edit to your exact subdomain.
+const GATEWAY = "https://violet-deliberate-fly-257.mypinata.cloud";
 
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env: ${name}`);
-  return v;
+// Manifest CID (NO ipfs:// prefix, NO args, NO env). Edit to your manifest CID.
+const MANIFEST_CID = "QmY7wfF53UzHQjkLRQF6fi4s4afqMrb33wayeeySc4ZY4P";
+
+// Remote embedder base URL (NO fallback).
+const EMBEDDER_BASE_URL = "http://170.75.163.164:4916";
+
+// =====================
+// UTILS
+// =====================
+const sha256Hex = (u8: Uint8Array) => {
+  const h = createHash("sha256");
+  h.update(u8);
+  return "sha256:" + h.digest("hex");
+};
+function requireNonEmpty(name: string, v: string) {
+  if (!v || !v.trim()) throw new Error(`Missing required ${name}`);
+  return v.trim();
+}
+function gatewayJoin(base: string, cid: string): string {
+  const b = base.replace(/\/+$/, "");
+  const c = cid.replace(/^\/+/, "");
+  return `${b}/ipfs/${c}`;
 }
 
-type RuntimeLike = {
-  getSetting: (k: string) => string | undefined;
-  getService: <T = unknown>(_name: any) => T | null;
-};
-
-const runtime: RuntimeLike = {
-  getSetting: (k) => process.env[k],
-  getService: () => null,
-};
-
+// =====================
+// MAIN
+// =====================
 async function main() {
-  logger.info("=== iNFT + 0G plugin E2E test ===");
+  logger.info("=== iNFT + Remote Embedder (IPFS-only) E2E ===");
 
-  // 1) Manifest & vectors
-  const manifestUri = requireEnv("INFT_MANIFEST_URI");
-  const manifest = await loadManifest(manifestUri);
-  if (!manifest.vectors_uri) throw new Error("Manifest has no vectors_uri.");
+  const gateway = requireNonEmpty("GATEWAY", GATEWAY);
+  const manifestCid = requireNonEmpty("MANIFEST_CID", MANIFEST_CID);
+  const embedderBase = requireNonEmpty("EMBEDDER_BASE_URL", EMBEDDER_BASE_URL);
+
+  // 1) Load manifest from Pinata subdomain gateway (no args, no ipfs://)
+  const manifestUrl = gatewayJoin(gateway, manifestCid);
+  const manifest = await loadManifest(manifestUrl, { gateway });
   logger.info(`Manifest loaded. model=${manifest.e_model.id} dim=${manifest.e_model.dim}`);
 
-  const gateway = process.env.PINATA_GATEWAY;
+  // 2) Verify vectors checksum strictly via IPFS/gateway
+  const mAny = manifest as any;
+  if (!mAny.vectors_uri) throw new Error("Manifest missing vectors_uri (expected IPFS CID/URI).");
+  if (!mAny.vectors_checksum) throw new Error("Manifest missing vectors_checksum.");
+
+  const vectorsUrl = isIpfsLike(mAny.vectors_uri)
+    ? ipfsToHttp(mAny.vectors_uri, gateway) // requires gateway; no fallback
+    : mAny.vectors_uri;
+
+  const vecBytes = await fetchBytesSmart(vectorsUrl, gateway);
+  const got = sha256Hex(vecBytes);
+  if (got !== mAny.vectors_checksum) {
+    throw new Error(`vectors_checksum mismatch:\n  manifest: ${mAny.vectors_checksum}\n  computed: ${got}`);
+  }
+
+  // 3) Build store (downloads vectors.bin from the same gateway)
   const store = await ExternalVectorStore.fromManifestWithExternalVectors(manifest, gateway);
   logger.info(`Vectors loaded: ${store.size()} entries.`);
 
-  // 2) Embedder (REMOTE or LOCAL)
-  const useRemote = /^1|true$/i.test(String(process.env.USE_REMOTE_EMBEDDER));
-  const modelIdEnv = dequote(process.env.MODEL_ID) || manifest.e_model.id;
+  // 4) Remote embedder ONLY (no LocalEmbedder, no fallback)
+  const remote = new RemoteEmbedder(embedderBase);
 
-  if (modelIdEnv !== manifest.e_model.id) {
-    throw new Error(
-      `Model contract mismatch:\n` +
-      `  manifest.model.id = ${manifest.e_model.id}\n` +
-      `  runtime MODEL_ID   = ${modelIdEnv}\n`
-    );
+  // 5) Query -> embed -> search
+  const k: number = Number((mAny.character?.settings?.k ?? 5) as number);
+  const query = "Give me a concise explanation of the feedback and incentive policies with key points.";
+
+  const [qVec] = await remote.embed([query], { mode: "query", instruction: "e5", normalize: true });
+  if (!qVec || qVec.length !== manifest.e_model.dim) {
+    throw new Error(`Remote dim ${qVec?.length ?? 0} != manifest dim ${manifest.e_model.dim}`);
   }
+  normalizeInPlace(qVec);
 
-  let embedOne: (q: string) => Promise<Float32Array>;
-  if (useRemote) {
-    const base = requireEnv("EMBEDDINGS_BASE_URL");
-    const remote = new RemoteEmbedder(base);
-    embedOne = async (q: string) => {
-      const vecs = await remote.embed([q], { mode: "query", instruction: "e5", normalize: true });
-      const v = vecs[0];
-      if (v.length !== manifest.e_model.dim) {
-        throw new Error(`Remote dim ${v.length} != manifest dim ${manifest.e_model.dim}`);
-      }
-      return v;
-    };
-  } else {
-    const local = new LocalEmbedder(modelIdEnv);
-    const info = await local.info();
-    ensureModelContract(manifest.e_model, info);
-    embedOne = async (q: string) => {
-      const [v] = await local.embed([q], { mode: "query", instruction: "e5", normalize: true });
-      return v;
-    };
-  }
-
-  // 3) Query → search
-  const query =
-    "Who Is Eren Yager";
-  const q = await embedOne(query);
-  normalizeInPlace(q);
-
-  const k = Number(process.env.INFT_TOP_K);
-  const hits = store.search(q, k);
+  const hits = store.search(qVec, k);
   if (!hits.length) throw new Error("No retrieval hits.");
 
   logger.info("Top retrieval hits:");
   hits.forEach((h, i) => console.log(`  (${i + 1}) score=${h.score.toFixed(3)} :: ${h.text}`));
 
+  // Prompt preview (in case you later send to an LLM)
   const ctx =
     "### Retrieved Knowledge\n" +
     hits.map((h, i) => `(${i + 1}) [${h.score.toFixed(3)}] ${h.text}`).join("\n");
+
   const prompt = [
-    `You are ${manifest.character.name}.`,
-    manifest.character.system ? `System: ${manifest.character.system}` : "",
+    manifest.character?.name ? `You are ${manifest.character.name}.` : "",
+    manifest.character?.system ? `System: ${manifest.character.system}` : "",
     ctx,
     "### Task",
     query,
     "",
-    "Answer concisely and cite snippets (1..k) inline like [1],[2] where relevant.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    "Answer concisely and cite snippets (1..k) inline like [1],[2] where relevant."
+  ].filter(Boolean).join("\n");
 
-  // 4) 0G call (requires EVM_RPC & PRIVATE_KEY)
-  if (!process.env.EVM_RPC || !process.env.PRIVATE_KEY) {
-    console.warn("\n[SKIP] 0G inference: set EVM_RPC and PRIVATE_KEY.");
-    console.log("\nComposed prompt preview:\n", prompt);
-    return;
-  }
+  console.log("\n--- Prompt Preview ---\n");
+  console.log(prompt);
 
-
-  const wallet = new Wallet(process.env.PRIVATE_KEY, new JsonRpcProvider(process.env.EVM_RPC))
-
-
-
-
-  const og = await (OgBrokerService).start(runtime as any);
-  await og.initialize(wallet)
-  const res = await og.infer({ prompt, providerAddress: manifest.model.providerId });
-  console.log(res)
-  console.log("\n=== 0G Model Reply ===\n");
-  console.log(res.text);
-  console.log("\n--- meta ---");
-  console.log(`provider: ${res.provider}`);
-  console.log(`model:    ${res.model}`);
-  if (res.chatID) console.log(`chatID:   ${res.chatID}`);
-
-  logger.info("E2E test completed.");
+  logger.info("Done (remote-only, IPFS-only, no args, no fallbacks).");
 }
 
 main().catch((err) => {
